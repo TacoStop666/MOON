@@ -27,7 +27,10 @@ def mkdirs(dirpath):
 
 
 def load_cifar10_data(datadir):
+    # Create a transform to convert images to tensors
     transform = transforms.Compose([transforms.ToTensor()])
+    # transforms.Compose([...]) allows you to chain multiple transformations together
+    # transforms.ToTensor() converts an image to a tensor and scales pixel values from [0, 255] to [0.0, 1.0]
 
     cifar10_train_ds = CIFAR10_truncated(datadir, train=True, download=True, transform=transform)
     cifar10_test_ds = CIFAR10_truncated(datadir, train=False, download=True, transform=transform)
@@ -59,23 +62,32 @@ def load_cifar100_data(datadir):
 def load_tinyimagenet_data(datadir):
     transform = transforms.Compose([transforms.ToTensor()])
     xray_train_ds = ImageFolder_custom(datadir+'./train/', transform=transform)
-    xray_test_ds = ImageFolder_custom(datadir+'./val/', transform=transform)
+    xray_test_ds = ImageFolder_custom(datadir+'./val/', transform=transform) 
 
+    # xray_train_ds.samples -> list of (image_path, class_index) tuples
     X_train, y_train = np.array([s[0] for s in xray_train_ds.samples]), np.array([int(s[1]) for s in xray_train_ds.samples])
-    X_test, y_test = np.array([s[0] for s in xray_test_ds.samples]), np.array([int(s[1]) for s in xray_test_ds.samples])
+    X_test, y_test = np.array([s[0] for s in xray_test_ds.samples]), np.array([int(s[1]) for s in xray_test_ds.samples]) 
 
     return (X_train, y_train, X_test, y_test)
 
 
 def record_net_data_stats(y_train, net_dataidx_map, logdir):
+    # A dictionary mapping each network/client (net_i) to another dictionary that maps class labels to their counts in that client's data
+    # net_cls_counts = {
+    #     0: {0: 10, 1: 15, 2: 5},
+    #     1: {0: 8, 1: 12, 2: 10},
+    #     ...
+    # }
     net_cls_counts = {}
 
     for net_i, dataidx in net_dataidx_map.items():
-        unq, unq_cnt = np.unique(y_train[dataidx], return_counts=True)
-        tmp = {unq[i]: unq_cnt[i] for i in range(len(unq))}
-        net_cls_counts[net_i] = tmp
+        # y_train[dataidx] = [0, 1, 1, 2] -> unq = [0, 1, 2]
+        # For the above, unq_cnt = [1, 2, 1]
+        unq, unq_cnt = np.unique(y_train[dataidx], return_counts=True) # get unique class labels and their counts
+        tmp = {unq[i]: unq_cnt[i] for i in range(len(unq))} # create a dictionary mapping class labels to counts
+        net_cls_counts[net_i] = tmp # store the class counts for the current network
 
-    data_list=[]
+    data_list=[] # list to hold total counts of data for each network
     for net_id, data in net_cls_counts.items():
         n_total=0
         for class_id, n_data in data.items():
@@ -99,9 +111,15 @@ def partition_data(dataset, datadir, logdir, partition, n_parties, beta=0.4):
     n_train = y_train.shape[0]
 
     if partition == "homo" or partition == "iid":
-        idxs = np.random.permutation(n_train)
-        batch_idxs = np.array_split(idxs, n_parties)
-        net_dataidx_map = {i: batch_idxs[i] for i in range(n_parties)}
+        idxs = np.random.permutation(n_train) # Randomly shuffle the training data indices
+        # idxs = np.arange(10)  # [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+        # n_parties = 3
+
+        # batch_idxs = np.array_split(idxs, n_parties)
+        # print(batch_idxs) 
+        # [array([0, 1, 2, 3]), array([4, 5, 6]), array([7, 8, 9])]
+        batch_idxs = np.array_split(idxs, n_parties) # Split the shuffled indices into n_parties parts
+        net_dataidx_map = {i: batch_idxs[i] for i in range(n_parties)} # Create a mapping of each party to its data indices
 
 
     elif partition == "noniid-labeldir" or partition == "noniid":
@@ -114,20 +132,20 @@ def partition_data(dataset, datadir, logdir, partition, n_parties, beta=0.4):
             K = 200
             # min_require_size = 100
 
-        N = y_train.shape[0]
-        net_dataidx_map = {}
+        N = y_train.shape[0] # Total number of training samples
+        net_dataidx_map = {} # Dictionary to hold the data indices for each party
 
         while min_size < min_require_size:
-            idx_batch = [[] for _ in range(n_parties)]
+            idx_batch = [[] for _ in range(n_parties)] # Initialize a list of empty lists for each party
             for k in range(K):
-                idx_k = np.where(y_train == k)[0]
+                idx_k = np.where(y_train == k)[0] # Get the indices of samples belonging to class k
                 np.random.shuffle(idx_k)
-                proportions = np.random.dirichlet(np.repeat(beta, n_parties))
-                proportions = np.array([p * (len(idx_j) < N / n_parties) for p, idx_j in zip(proportions, idx_batch)])
-                proportions = proportions / proportions.sum()
-                proportions = (np.cumsum(proportions) * len(idx_k)).astype(int)[:-1]
-                idx_batch = [idx_j + idx.tolist() for idx_j, idx in zip(idx_batch, np.split(idx_k, proportions))]
-                min_size = min([len(idx_j) for idx_j in idx_batch])
+                proportions = np.random.dirichlet(np.repeat(beta, n_parties)) # Generate random proportions for each party
+                proportions = np.array([p * (len(idx_j) < N / n_parties) for p, idx_j in zip(proportions, idx_batch)]) # Scale proportions based on the current size of each party's data
+                proportions = proportions / proportions.sum() # Normalize the proportions to sum to 1
+                proportions = (np.cumsum(proportions) * len(idx_k)).astype(int)[:-1] # Compute cumulative proportions to determine how many samples each party should get
+                idx_batch = [idx_j + idx.tolist() for idx_j, idx in zip(idx_batch, np.split(idx_k, proportions))] # Split the indices of class k samples among the parties based on the computed proportions
+                min_size = min([len(idx_j) for idx_j in idx_batch]) # Check the minimum size of data across all parties
                 # if K == 2 and n_parties <= 10:
                 #     if np.min(proportions) < 200:
                 #         min_size = 0
