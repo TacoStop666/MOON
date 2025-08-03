@@ -139,9 +139,16 @@ def partition_data(dataset, datadir, logdir, partition, n_parties, beta=0.4):
             idx_batch = [[] for _ in range(n_parties)] # Initialize a list of empty lists for each party
             for k in range(K):
                 idx_k = np.where(y_train == k)[0] # Get the indices of samples belonging to class k
-                np.random.shuffle(idx_k)
+                np.random.shuffle(idx_k) # Randomly shuffle the indices of class k samples
+
                 proportions = np.random.dirichlet(np.repeat(beta, n_parties)) # Generate random proportions for each party
-                proportions = np.array([p * (len(idx_j) < N / n_parties) for p, idx_j in zip(proportions, idx_batch)]) # Scale proportions based on the current size of each party's data
+                # Example of proportions: [0.2, 0.3, 0.5] for 3 parties
+
+                # proportions: a list of values (one per client/party) sampled from a Dirichlet distribution, representing how much of the current class should go to each client
+                # idx_batch: a list of lists, where each sublist contains the indices already assigned to each client
+                # This condition checks if the current client has fewer samples than the average (N / n_parties). If true, it returns p (so the proportion is kept); if false, it returns 0 (so the proportion is set to zero)
+                proportions = np.array([p * (len(idx_j) < N / n_parties) for p, idx_j in zip(proportions, idx_batch)]) # Clients that already have at least their "fair share" of data will not receive more samples for this class
+
                 proportions = proportions / proportions.sum() # Normalize the proportions to sum to 1
                 proportions = (np.cumsum(proportions) * len(idx_k)).astype(int)[:-1] # Compute cumulative proportions to determine how many samples each party should get
                 idx_batch = [idx_j + idx.tolist() for idx_j, idx in zip(idx_batch, np.split(idx_k, proportions))] # Split the indices of class k samples among the parties based on the computed proportions
@@ -152,7 +159,7 @@ def partition_data(dataset, datadir, logdir, partition, n_parties, beta=0.4):
                 #         break
 
         for j in range(n_parties):
-            np.random.shuffle(idx_batch[j])
+            np.random.shuffle(idx_batch[j]) # 
             net_dataidx_map[j] = idx_batch[j]
 
     traindata_cls_counts = record_net_data_stats(y_train, net_dataidx_map, logdir)
@@ -161,28 +168,34 @@ def partition_data(dataset, datadir, logdir, partition, n_parties, beta=0.4):
 
 def get_trainable_parameters(net, device='cpu'):
     'return trainable parameter values as a vector (only the first parameter set)'
-    trainable = filter(lambda p: p.requires_grad, net.parameters())
+    """
+    This function extracts all trainable parameters (weights and biases that require gradients) from a PyTorch model (net) and flattens them into a single 1D tensor (vector)
+    """
+    trainable = filter(lambda p: p.requires_grad, net.parameters()) # Get only the parameters that require gradients (i.e., trainable parameters)
     # print("net.parameter.data:", list(net.parameters()))
     paramlist = list(trainable)
     #print("paramlist:", paramlist)
     N = 0
     for params in paramlist:
-        N += params.numel()
+        N += params.numel() # Calculate the total number of elements in all trainable parameters
         # print("params.data:", params.data)
-    X = torch.empty(N, dtype=torch.float64, device=device)
-    X.fill_(0.0)
-    offset = 0
-    for params in paramlist:
-        numel = params.numel()
-        with torch.no_grad():
-            X[offset:offset + numel].copy_(params.data.view_as(X[offset:offset + numel].data))
-        offset += numel
+    X = torch.empty(N, dtype=torch.float64, device=device) # Create an empty tensor to hold the trainable parameters
+    X.fill_(0.0) # Initialize the tensor with zeros
+    offset = 0 # Offset to keep track of where to place the next parameter values in the tensor
+    for params in paramlist: # Iterate through each trainable parameter
+        numel = params.numel() # Get the number of elements in the current parameter
+        with torch.no_grad(): # Disable gradient tracking for this operation
+            X[offset:offset + numel].copy_(params.data.view_as(X[offset:offset + numel].data)) # Copy the parameter values into the tensor
+        offset += numel # Update the offset to point to the next position in the tensor
     # print("get trainable x:", X)
     return X
 
 
 def put_trainable_parameters(net, X):
     'replace trainable parameter values by the given vector (only the first parameter set)'
+    """
+    This function takes a flat 1D tensor X (containing all trainable parameters) and copies its values back into the corresponding parameters of the PyTorch model net
+    """
     trainable = filter(lambda p: p.requires_grad, net.parameters())
     paramlist = list(trainable)
     offset = 0
@@ -194,56 +207,58 @@ def put_trainable_parameters(net, X):
 
 
 def compute_accuracy(model, dataloader, get_confusion_matrix=False, device="cpu", multiloader=False):
-    was_training = False
-    if model.training:
-        model.eval()
-        was_training = True
+    was_training = False # If the model is in training mode, switch it to evaluation mode
+    if model.training: # Check if the model is currently in training mode
+        model.eval() # Switch the model to evaluation mode
+        was_training = True # Set a flag to remember that we switched the model to evaluation mode
 
     true_labels_list, pred_labels_list = np.array([]), np.array([])
 
-    correct, total = 0, 0
+    correct, total = 0, 0 # Initialize counters for correct predictions and total samples
     if device == 'cpu':
-        criterion = nn.CrossEntropyLoss()
-    elif "cuda" in device.type:
-        criterion = nn.CrossEntropyLoss().cuda()
-    loss_collector = []
-    if multiloader:
-        for loader in dataloader:
-            with torch.no_grad():
-                for batch_idx, (x, target) in enumerate(loader):
+        criterion = nn.CrossEntropyLoss() # Define the loss function for CPU
+    elif "cuda" in device.type: 
+        criterion = nn.CrossEntropyLoss().cuda() # Define the loss function for GPU
+    loss_collector = [] # Initialize a list to collect loss values
+    if multiloader: 
+        for loader in dataloader: # Iterate through each data loader
+            with torch.no_grad(): # Disable gradient tracking for the evaluation phase
+                for batch_idx, (x, target) in enumerate(loader): # Iterate through each batch in the data loader
+                    # x: input batch
+                    # target: label batch
                     #print("x:",x)
                     #print("target:",target)
                     if device != 'cpu':
-                        x, target = x.cuda(), target.to(dtype=torch.int64).cuda()
-                    _, _, out = model(x)
-                    if len(target)==1:
-                        loss = criterion(out, target)
+                        x, target = x.cuda(), target.to(dtype=torch.int64).cuda() # Move the input data and target labels to the appropriate device (GPU or CPU)
+                    _, _, out = model(x) # Forward pass through the model to get the output predictions
+                    if len(target)==1: # If the target has only one element, it is treated as a scalar
+                        loss = criterion(out, target)  # Compute the loss using the output predictions and target labels
                     else:
-                        loss = criterion(out, target)
-                    _, pred_label = torch.max(out.data, 1)
-                    loss_collector.append(loss.item())
-                    total += x.data.size()[0]
-                    correct += (pred_label == target.data).sum().item()
+                        loss = criterion(out, target) # Compute the loss using the output predictions and target labels
+                    _, pred_label = torch.max(out.data, 1) # Get the predicted labels by taking the index of the maximum value in the output predictions
+                    loss_collector.append(loss.item()) # Append the loss value to the loss collector
+                    total += x.data.size()[0] # Update the total number of samples processed
+                    correct += (pred_label == target.data).sum().item() # Count the number of correct predictions by comparing predicted labels with target labels
 
                     if device == "cpu":
-                        pred_labels_list = np.append(pred_labels_list, pred_label.numpy())
-                        true_labels_list = np.append(true_labels_list, target.data.numpy())
+                        pred_labels_list = np.append(pred_labels_list, pred_label.numpy()) # Append predicted labels to the list
+                        true_labels_list = np.append(true_labels_list, target.data.numpy()) # Append true labels to the list
                     else:
-                        pred_labels_list = np.append(pred_labels_list, pred_label.cpu().numpy())
-                        true_labels_list = np.append(true_labels_list, target.data.cpu().numpy())
-        avg_loss = sum(loss_collector) / len(loss_collector)
+                        pred_labels_list = np.append(pred_labels_list, pred_label.cpu().numpy()) # Append predicted labels to the list (for GPU)
+                        true_labels_list = np.append(true_labels_list, target.data.cpu().numpy()) # Append true labels to the list (for GPU)
+        avg_loss = sum(loss_collector) / len(loss_collector) 
     else:
         with torch.no_grad():
             for batch_idx, (x, target) in enumerate(dataloader):
                 #print("x:",x)
                 if device != 'cpu':
-                    x, target = x.cuda(), target.to(dtype=torch.int64).cuda()
-                _,_,out = model(x)
-                loss = criterion(out, target)
-                _, pred_label = torch.max(out.data, 1)
-                loss_collector.append(loss.item())
-                total += x.data.size()[0]
-                correct += (pred_label == target.data).sum().item()
+                    x, target = x.cuda(), target.to(dtype=torch.int64).cuda() # Move the input data and target labels to the appropriate device (GPU or CPU)
+                _,_,out = model(x) # Forward pass through the model to get the output predictions
+                loss = criterion(out, target) # Compute the loss using the output predictions and target labels
+                _, pred_label = torch.max(out.data, 1) # Get the predicted labels by taking the index of the maximum value in the output predictions
+                loss_collector.append(loss.item()) # Append the loss value to the loss collector
+                total += x.data.size()[0] # Update the total number of samples processed
+                correct += (pred_label == target.data).sum().item() # Count the number of correct predictions by comparing predicted labels with target labels
 
                 if device == "cpu":
                     pred_labels_list = np.append(pred_labels_list, pred_label.numpy())
@@ -254,15 +269,15 @@ def compute_accuracy(model, dataloader, get_confusion_matrix=False, device="cpu"
             avg_loss = sum(loss_collector) / len(loss_collector)
 
     if get_confusion_matrix:
-        conf_matrix = confusion_matrix(true_labels_list, pred_labels_list)
+        conf_matrix = confusion_matrix(true_labels_list, pred_labels_list) # Compute the confusion matrix using true and predicted labels
 
     if was_training:
-        model.train()
+        model.train() # Switch the model back to training mode if it was originally in training mode
 
     if get_confusion_matrix:
-        return correct / float(total), conf_matrix, avg_loss
+        return correct / float(total), conf_matrix, avg_loss 
 
-    return correct / float(total), avg_loss
+    return correct / float(total), avg_loss 
 
 def compute_loss(model, dataloader, device="cpu"):
     was_training = False
@@ -293,21 +308,20 @@ def compute_loss(model, dataloader, device="cpu"):
 
 def save_model(model, model_index, args):
     logger.info("saving local model-{}".format(model_index))
-    with open(args.modeldir + "trained_local_model" + str(model_index), "wb") as f_:
-        torch.save(model.state_dict(), f_)
+    with open(args.modeldir + "trained_local_model" + str(model_index), "wb") as f_: # Save the model state dictionary to a file
+        torch.save(model.state_dict(), f_) # Save the model's state dictionary (weights and biases) to the specified file
     return
 
 
 def load_model(model, model_index, device="cpu"):
-    #
-    with open("trained_local_model" + str(model_index), "rb") as f_:
-        model.load_state_dict(torch.load(f_))
-    if device == "cpu":
-        model.to(device)
-    else:
-        model.cuda()
-    return model
 
+    with open("trained_local_model" + str(model_index), "rb") as f_: # Load the model state dictionary from a file
+        model.load_state_dict(torch.load(f_)) # Load the model's state dictionary (weights and biases) from the specified file
+    if device == "cpu":
+        model.to(device) # Move the model to the CPU
+    else:
+        model.cuda() # Move the model to the specified device (GPU)
+    return model
 
 def get_dataloader(dataset, datadir, train_bs, test_bs, dataidxs=None, noise_level=0):
     if dataset in ('cifar10', 'cifar100'):
@@ -315,8 +329,8 @@ def get_dataloader(dataset, datadir, train_bs, test_bs, dataidxs=None, noise_lev
             dl_obj = CIFAR10_truncated
 
             normalize = transforms.Normalize(mean=[x / 255.0 for x in [125.3, 123.0, 113.9]],
-                                             std=[x / 255.0 for x in [63.0, 62.1, 66.7]])
-            transform_train = transforms.Compose([
+                                             std=[x / 255.0 for x in [63.0, 62.1, 66.7]]) # Normalize the CIFAR-10 dataset images
+            transform_train = transforms.Compose([ # Define the transformations for the training set
                 transforms.ToTensor(),
                 transforms.Lambda(lambda x: F.pad(
                     Variable(x.unsqueeze(0), requires_grad=False),
@@ -329,7 +343,7 @@ def get_dataloader(dataset, datadir, train_bs, test_bs, dataidxs=None, noise_lev
                 normalize
             ])
             # data prep for test set
-            transform_test = transforms.Compose([
+            transform_test = transforms.Compose([ # Define the transformations for the test set
                 transforms.ToTensor(),
                 normalize])
 
@@ -337,14 +351,14 @@ def get_dataloader(dataset, datadir, train_bs, test_bs, dataidxs=None, noise_lev
             dl_obj = CIFAR100_truncated
 
             normalize = transforms.Normalize(mean=[0.5070751592371323, 0.48654887331495095, 0.4409178433670343],
-                                             std=[0.2673342858792401, 0.2564384629170883, 0.27615047132568404])
+                                             std=[0.2673342858792401, 0.2564384629170883, 0.27615047132568404]) # Normalize the CIFAR-100 dataset images
             # transform_train = transforms.Compose([
             #     transforms.RandomCrop(32),
             #     transforms.RandomHorizontalFlip(),
             #     transforms.ToTensor(),
             #     normalize
             # ])
-            transform_train = transforms.Compose([
+            transform_train = transforms.Compose([ # Define the transformations for the training set
                 # transforms.ToPILImage(),
                 transforms.RandomCrop(32, padding=4),
                 transforms.RandomHorizontalFlip(),
@@ -353,21 +367,24 @@ def get_dataloader(dataset, datadir, train_bs, test_bs, dataidxs=None, noise_lev
                 normalize
             ])
             # data prep for test set
-            transform_test = transforms.Compose([
+            transform_test = transforms.Compose([ # Define the transformations for the test set
                 transforms.ToTensor(),
                 normalize])
 
 
 
+        # Initialize datasets
         train_ds = dl_obj(datadir, dataidxs=dataidxs, train=True, transform=transform_train, download=True)
         test_ds = dl_obj(datadir, train=False, transform=transform_test, download=True)
 
+        # Create iterable objects that efficiently load batches of data from the training and test datasets, respectively
         train_dl = data.DataLoader(dataset=train_ds, batch_size=train_bs, drop_last=True, shuffle=True)
         test_dl = data.DataLoader(dataset=test_ds, batch_size=test_bs, shuffle=False)
 
 
     elif dataset == 'tinyimagenet':
         dl_obj = ImageFolder_custom
+        # data prep for train set
         transform_train = transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
@@ -377,11 +394,11 @@ def get_dataloader(dataset, datadir, train_bs, test_bs, dataidxs=None, noise_lev
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
         ])
 
-        train_ds = dl_obj(datadir+'./train/', dataidxs=dataidxs, transform=transform_train)
-        test_ds = dl_obj(datadir+'./val/', transform=transform_test)
+        train_ds = dl_obj(datadir+'./train/', dataidxs=dataidxs, transform=transform_train) 
+        test_ds = dl_obj(datadir+'./val/', transform=transform_test) 
 
-        train_dl = data.DataLoader(dataset=train_ds, batch_size=train_bs, drop_last=True, shuffle=True)
-        test_dl = data.DataLoader(dataset=test_ds, batch_size=test_bs, shuffle=False)
+        train_dl = data.DataLoader(dataset=train_ds, batch_size=train_bs, drop_last=True, shuffle=True) # DataLoader for training set
+        test_dl = data.DataLoader(dataset=test_ds, batch_size=test_bs, shuffle=False) # DataLoader for test set
 
 
     return train_dl, test_dl, train_ds, test_ds

@@ -10,7 +10,7 @@ import torch.nn as nn
 def conv3x3(in_planes, out_planes, stride=1, groups=1, dilation=1):
     """3x3 convolution with padding"""
     return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride,
-                     padding=dilation, groups=groups, bias=False, dilation=dilation)
+                     padding=dilation, groups=groups, bias=False, dilation=dilation) 
 
 
 def conv1x1(in_planes, out_planes, stride=1):
@@ -19,41 +19,42 @@ def conv1x1(in_planes, out_planes, stride=1):
 
 
 class BasicBlock(nn.Module):
-    expansion = 1
+    expansion = 1 # The expansion factor for the BasicBlock is 1, meaning output channels = input channels × 1
 
     def __init__(self, inplanes, planes, stride=1, downsample=None, groups=1,
                  base_width=64, dilation=1, norm_layer=None):
-        super(BasicBlock, self).__init__()
-        if norm_layer is None:
-            norm_layer = nn.BatchNorm2d
+        super(BasicBlock, self).__init__() 
+        if norm_layer is None: 
+            norm_layer = nn.BatchNorm2d # Default normalization layer is BatchNorm2d
         if groups != 1 or base_width != 64:
             raise ValueError('BasicBlock only supports groups=1 and base_width=64')
         if dilation > 1:
-            raise NotImplementedError("Dilation > 1 not supported in BasicBlock")
+            raise NotImplementedError("Dilation > 1 not supported in BasicBlock") 
         # Both self.conv1 and self.downsample layers downsample the input when stride != 1
-        self.conv1 = conv3x3(inplanes, planes, stride)
-        self.bn1 = norm_layer(planes)
-        self.relu = nn.ReLU(inplace=True)
-        self.conv2 = conv3x3(planes, planes)
-        self.bn2 = norm_layer(planes)
-        self.downsample = downsample
-        self.stride = stride
+        self.conv1 = conv3x3(inplanes, planes, stride) # 3x3 convolution with stride
+        self.bn1 = norm_layer(planes) # Normalization layer for the first convolution
+        self.relu = nn.ReLU(inplace=True) # ReLU activation function
+        self.conv2 = conv3x3(planes, planes) # Second 3x3 convolution
+        self.bn2 = norm_layer(planes) # Normalization layer for the second convolution
+        self.downsample = downsample # Downsample layer if needed
+        # downsample: a layer (or sequence of layers) used to match the dimensions of the input (identity) to the output of the residual block when they are different
+        self.stride = stride # Stride for the block
 
     def forward(self, x):
-        identity = x
+        identity = x # Save the input for the skip connection
 
-        out = self.conv1(x)
-        out = self.bn1(out)
-        out = self.relu(out)
+        out = self.conv1(x) # First convolution
+        out = self.bn1(out) # Apply normalization
+        out = self.relu(out) # ReLU activation
 
-        out = self.conv2(out)
-        out = self.bn2(out)
+        out = self.conv2(out) # Second convolution
+        out = self.bn2(out) # Apply normalization
 
         if self.downsample is not None:
-            identity = self.downsample(x)
+            identity = self.downsample(x) # Downsample the input if needed
 
-        out += identity
-        out = self.relu(out)
+        out += identity # Add the (possibly downsampled) input to the output (skip connection)
+        out = self.relu(out) # ReLU activation after the skip connection
 
         return out
 
@@ -65,21 +66,21 @@ class Bottleneck(nn.Module):
     # This variant is also known as ResNet V1.5 and improves accuracy according to
     # https://ngc.nvidia.com/catalog/model-scripts/nvidia:resnet_50_v1_5_for_pytorch.
 
-    expansion = 4
+    expansion = 4 # The expansion factor for the Bottleneck block is 4, meaning the output channels are four times the input channels.
 
     def __init__(self, inplanes, planes, stride=1, downsample=None, groups=1,
                  base_width=64, dilation=1, norm_layer=None):
         super(Bottleneck, self).__init__()
         if norm_layer is None:
-            norm_layer = nn.BatchNorm2d
-        width = int(planes * (base_width / 64.)) * groups
+            norm_layer = nn.BatchNorm2d # Default normalization layer is BatchNorm2d
+        width = int(planes * (base_width / 64.)) * groups # Calculate the width of the bottleneck block based on the base width and number of groups
         # Both self.conv2 and self.downsample layers downsample the input when stride != 1
-        self.conv1 = conv1x1(inplanes, width)
-        self.bn1 = norm_layer(width)
-        self.conv2 = conv3x3(width, width, stride, groups, dilation)
-        self.bn2 = norm_layer(width)
-        self.conv3 = conv1x1(width, planes * self.expansion)
-        self.bn3 = norm_layer(planes * self.expansion)
+        self.conv1 = conv1x1(inplanes, width) # 1x1 convolution to reduce the number of channels
+        self.bn1 = norm_layer(width) # Normalization layer for the first convolution
+        self.conv2 = conv3x3(width, width, stride, groups, dilation) # 3x3 convolution with stride, groups, and dilation
+        self.bn2 = norm_layer(width) # Normalization layer for the second convolution
+        self.conv3 = conv1x1(width, planes * self.expansion) # 1x1 convolution to increase the number of channels
+        self.bn3 = norm_layer(planes * self.expansion) # Normalization layer for the third convolution
         self.relu = nn.ReLU(inplace=True)
         self.downsample = downsample
         self.stride = stride
@@ -87,16 +88,16 @@ class Bottleneck(nn.Module):
     def forward(self, x):
         identity = x
 
-        out = self.conv1(x)
-        out = self.bn1(out)
-        out = self.relu(out)
+        out = self.conv1(x) # First 1x1 convolution
+        out = self.bn1(out) # Apply normalization
+        out = self.relu(out) # ReLU activation
+ 
+        out = self.conv2(out) # Second 3x3 convolution
+        out = self.bn2(out) # Apply normalization
+        out = self.relu(out) # ReLU activation
 
-        out = self.conv2(out)
-        out = self.bn2(out)
-        out = self.relu(out)
-
-        out = self.conv3(out)
-        out = self.bn3(out)
+        out = self.conv3(out) # Third 1x1 convolution
+        out = self.bn3(out) # Apply normalization
 
         if self.downsample is not None:
             identity = self.downsample(x)
@@ -118,7 +119,7 @@ class ResNetCifar10(nn.Module):
         self._norm_layer = norm_layer
 
         self.inplanes = 64
-        self.dilation = 1
+        self.dilation = 1 # Dilation factor for the convolutions, used for dilated convolutions
         if replace_stride_with_dilation is None:
             # each element in the tuple indicates if we should replace
             # the 2x2 stride with a dilated convolution instead
@@ -126,28 +127,28 @@ class ResNetCifar10(nn.Module):
         if len(replace_stride_with_dilation) != 3:
             raise ValueError("replace_stride_with_dilation should be None "
                              "or a 3-element tuple, got {}".format(replace_stride_with_dilation))
-        self.groups = groups
-        self.base_width = width_per_group
+        self.groups = groups # Number of groups for group convolution
+        self.base_width = width_per_group # Base width for the bottleneck block
         self.conv1 = nn.Conv2d(3, self.inplanes, kernel_size=3, stride=1, padding=1,
-                               bias=False)
-        self.bn1 = norm_layer(self.inplanes)
-        self.relu = nn.ReLU(inplace=True)
-        self.layer1 = self._make_layer(block, 64, layers[0])
-        self.layer2 = self._make_layer(block, 128, layers[1], stride=2,
-                                       dilate=replace_stride_with_dilation[0])
+                               bias=False) # Initial convolution layer with 3x3 kernel, stride 1, and padding 1
+        self.bn1 = norm_layer(self.inplanes) # Normalization layer for the initial convolution
+        self.relu = nn.ReLU(inplace=True) 
+        self.layer1 = self._make_layer(block, 64, layers[0]) # First layer of the ResNet, using the specified block type and number of layers
+        self.layer2 = self._make_layer(block, 128, layers[1], stride=2, 
+                                       dilate=replace_stride_with_dilation[0]) # Second layer with stride 2 and possible dilation
         self.layer3 = self._make_layer(block, 256, layers[2], stride=2,
-                                       dilate=replace_stride_with_dilation[1])
+                                       dilate=replace_stride_with_dilation[1]) # Third layer with stride 2 and possible dilation
         self.layer4 = self._make_layer(block, 512, layers[3], stride=2,
-                                       dilate=replace_stride_with_dilation[2])
-        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-        self.fc = nn.Linear(512 * block.expansion, num_classes)
+                                       dilate=replace_stride_with_dilation[2]) # Fourth layer with stride 2 and possible dilation
+        self.avgpool = nn.AdaptiveAvgPool2d((1, 1)) # Adaptive average pooling to output a fixed size (1, 1)
+        self.fc = nn.Linear(512 * block.expansion, num_classes) # Fully connected layer to output the final class scores
 
         for m in self.modules():
-            if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
-            elif isinstance(m, (nn.BatchNorm2d, nn.GroupNorm)):
-                nn.init.constant_(m.weight, 1)
-                nn.init.constant_(m.bias, 0)
+            if isinstance(m, nn.Conv2d): # Initialize convolutional layers 
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu') # Initialize convolutional layers with He initialization
+            elif isinstance(m, (nn.BatchNorm2d, nn.GroupNorm)): # Initialize normalization layers
+                nn.init.constant_(m.weight, 1) # Set the weight to 1
+                nn.init.constant_(m.bias, 0) # Set the bias to 0
 
         # Zero-initialize the last BN in each residual branch,
         # so that the residual branch starts with zeros, and each residual block behaves like an identity.

@@ -60,7 +60,8 @@ def get_args():
 
 
 def init_nets(net_configs, n_parties, args, device='cpu'):
-    nets = {net_i: None for net_i in range(n_parties)}
+    nets = {net_i: None for net_i in range(n_parties)} # initialize nets dict
+    # nets is a dictionary where keys are party indices and values are the corresponding neural networks
     if args.dataset in {'mnist', 'cifar10', 'svhn', 'fmnist'}:
         n_classes = 10
     elif args.dataset == 'celeba':
@@ -75,7 +76,7 @@ def init_nets(net_configs, n_parties, args, device='cpu'):
         n_classes = 47
     elif args.dataset == 'xray':
         n_classes = 2
-    if args.normal_model:
+    if args.normal_model: # use normal model
         for net_i in range(n_parties):
             if args.model == 'simple-cnn':
                 net = SimpleCNNMNIST(input_dim=(16 * 4 * 4), hidden_dims=[120, 84], output_dim=10)
@@ -84,33 +85,34 @@ def init_nets(net_configs, n_parties, args, device='cpu'):
             else:
                 net = net.cuda()
             nets[net_i] = net
-    else:
+    else: # use aggregate model
         for net_i in range(n_parties):
-            if args.use_project_head:
-                net = ModelFedCon(args.model, args.out_dim, n_classes, net_configs)
+            if args.use_project_head: # use projection head
+                net = ModelFedCon(args.model, args.out_dim, n_classes, net_configs) # ModelFedCon with projection head
             else:
-                net = ModelFedCon_noheader(args.model, args.out_dim, n_classes, net_configs)
+                net = ModelFedCon_noheader(args.model, args.out_dim, n_classes, net_configs) # ModelFedCon without projection head
             if device == 'cpu':
                 net.to(device)
             else:
                 net = net.cuda()
             nets[net_i] = net
 
-    model_meta_data = []
-    layer_type = []
-    for (k, v) in nets[0].state_dict().items():
-        model_meta_data.append(v.shape)
-        layer_type.append(k)
+    model_meta_data = [] # to store the shape (dimensions) of each layer in the model
+    layer_type = [] # to store the names (types) of each layer in the model
+    for (k, v) in nets[0].state_dict().items(): # iterate through the first net's state_dict
+        # k: layer name, v: layer parameters
+        model_meta_data.append(v.shape) # append the shape of each layer to model_meta_data
+        layer_type.append(k) # append the layer name to layer_type
 
     return nets, model_meta_data, layer_type
 
-
+# Train function for FedAvg algorithm
 def train_net(net_id, net, train_dataloader, test_dataloader, epochs, lr, args_optimizer, args, device="cpu"):
-    net = nn.DataParallel(net)
-    net.cuda()
-    logger.info('Training network %s' % str(net_id))
-    logger.info('n_training: %d' % len(train_dataloader))
-    logger.info('n_test: %d' % len(test_dataloader))
+    net = nn.DataParallel(net) # wrap the model in DataParallel for multi-GPU training
+    net.cuda() 
+    logger.info('Training network %s' % str(net_id)) 
+    logger.info('n_training: %d' % len(train_dataloader)) # log the number of training samples
+    logger.info('n_test: %d' % len(test_dataloader)) # log the number of training and test samples
 
     train_acc,_ = compute_accuracy(net, train_dataloader, device=device)
 
@@ -127,40 +129,43 @@ def train_net(net_id, net, train_dataloader, test_dataloader, epochs, lr, args_o
     elif args_optimizer == 'sgd':
         optimizer = optim.SGD(filter(lambda p: p.requires_grad, net.parameters()), lr=lr, momentum=0.9,
                               weight_decay=args.reg)
-    criterion = nn.CrossEntropyLoss().cuda()
+    criterion = nn.CrossEntropyLoss().cuda() 
 
     cnt = 0
 
     for epoch in range(epochs):
-        epoch_loss_collector = []
-        for batch_idx, (x, target) in enumerate(train_dataloader):
-            x, target = x.cuda(), target.cuda()
+        epoch_loss_collector = [] # to collect loss values for each epoch
+        for batch_idx, (x, target) in enumerate(train_dataloader): # iterate through the training dataloader
+            x, target = x.cuda(), target.cuda() 
+            # x: input data, target: ground truth labels
 
-            optimizer.zero_grad()
-            x.requires_grad = False
-            target.requires_grad = False
-            target = target.long()
+            optimizer.zero_grad() # zero the gradients
+            x.requires_grad = False # disable gradient computation for input
+            target.requires_grad = False # disable gradient computation for target
+            target = target.long() # convert target to long type
 
-            _,_,out = net(x)
-            loss = criterion(out, target)
+            _,_,out = net(x) # forward pass through the model
+            loss = criterion(out, target) # compute the cross-entropy loss
+            # loss is something look like tensor(2.3026, device='cuda:0')
 
-            loss.backward()
-            optimizer.step()
+            loss.backward() # backpropagate the loss
+            optimizer.step() # update the model parameters
 
-            cnt += 1
-            epoch_loss_collector.append(loss.item())
+            cnt += 1 # increment the counter
+            epoch_loss_collector.append(loss.item()) # append the loss value to epoch_loss_collector
+            # loss.item() is a Python float representing the loss value
 
-        epoch_loss = sum(epoch_loss_collector) / len(epoch_loss_collector)
-        logger.info('Epoch: %d Loss: %f' % (epoch, epoch_loss))
+        epoch_loss = sum(epoch_loss_collector) / len(epoch_loss_collector) # compute the average loss for the epoch
+        logger.info('Epoch: %d Loss: %f' % (epoch, epoch_loss)) # log the epoch number and loss value
 
-        if epoch % 10 == 0:
+        if epoch % 10 == 0: # log training and test accuracy every 10 epochs
             train_acc, _ = compute_accuracy(net, train_dataloader, device=device)
             test_acc, conf_matrix, _ = compute_accuracy(net, test_dataloader, get_confusion_matrix=True, device=device)
 
             logger.info('>> Training accuracy: %f' % train_acc)
             logger.info('>> Test accuracy: %f' % test_acc)
 
-    train_acc, _ = compute_accuracy(net, train_dataloader, device=device)
+    train_acc, _ = compute_accuracy(net, train_dataloader, device=device) # _ avg loss
     test_acc, conf_matrix, _ = compute_accuracy(net, test_dataloader, get_confusion_matrix=True, device=device)
 
     logger.info('>> Training accuracy: %f' % train_acc)
@@ -170,7 +175,7 @@ def train_net(net_id, net, train_dataloader, test_dataloader, epochs, lr, args_o
     logger.info(' ** Training complete **')
     return train_acc, test_acc
 
-
+# Train function for FedProx algorithm
 def train_net_fedprox(net_id, net, global_net, train_dataloader, test_dataloader, epochs, lr, args_optimizer, mu, args,
                       device="cpu"):
     # global_net.to(device)
@@ -200,8 +205,7 @@ def train_net_fedprox(net_id, net, global_net, train_dataloader, test_dataloader
     criterion = nn.CrossEntropyLoss().cuda()
 
     cnt = 0
-    global_weight_collector = list(global_net.cuda().parameters())
-
+    global_weight_collector = list(global_net.cuda().parameters()) # collect global model parameters
 
     for epoch in range(epochs):
         epoch_loss_collector = []
@@ -217,11 +221,11 @@ def train_net_fedprox(net_id, net, global_net, train_dataloader, test_dataloader
             loss = criterion(out, target)
 
             # for fedprox
-            fed_prox_reg = 0.0
+            fed_prox_reg = 0.0 # initialize the fedprox regularization term
             # fed_prox_reg += np.linalg.norm([i - j for i, j in zip(global_weight_collector, get_trainable_parameters(net).tolist())], ord=2)
-            for param_index, param in enumerate(net.parameters()):
-                fed_prox_reg += ((mu / 2) * torch.norm((param - global_weight_collector[param_index])) ** 2)
-            loss += fed_prox_reg
+            for param_index, param in enumerate(net.parameters()): # iterate through the model parameters
+                fed_prox_reg += ((mu / 2) * torch.norm((param - global_weight_collector[param_index])) ** 2) # compute the fedprox regularization term
+            loss += fed_prox_reg # add the fedprox regularization term to the loss
 
             loss.backward()
             optimizer.step()
@@ -266,65 +270,75 @@ def train_net_fedcon(net_id, net, global_net, previous_nets, train_dataloader, t
                                amsgrad=True)
     elif args_optimizer == 'sgd':
         optimizer = optim.SGD(filter(lambda p: p.requires_grad, net.parameters()), lr=lr, momentum=0.9,
-                              weight_decay=args.reg)
+                              weight_decay=args.reg) # default
 
     criterion = nn.CrossEntropyLoss().cuda()
     # global_net.to(device)
 
-    for previous_net in previous_nets:
-        previous_net.cuda()
+    for previous_net in previous_nets: 
+        previous_net.cuda() # move previous nets to GPU
     global_w = global_net.state_dict()
 
     cnt = 0
-    cos=torch.nn.CosineSimilarity(dim=-1)
+    cos=torch.nn.CosineSimilarity(dim=-1) # cosine similarity function
     # mu = 0.001
 
     for epoch in range(epochs):
-        epoch_loss_collector = []
+        epoch_loss_collector = [] 
         epoch_loss1_collector = []
         epoch_loss2_collector = []
         for batch_idx, (x, target) in enumerate(train_dataloader):
             x, target = x.cuda(), target.cuda()
 
-            optimizer.zero_grad()
-            x.requires_grad = False
+            optimizer.zero_grad() # zero the gradients
+            x.requires_grad = False 
             target.requires_grad = False
             target = target.long()
 
-            _, pro1, out = net(x)
-            _, pro2, _ = global_net(x)
+            _, pro1, out = net(x) # forward pass through the local model
+            # pro1: projected features of input from local model (anchor)
+            # out: logits for classification
 
-            posi = cos(pro1, pro2)
-            logits = posi.reshape(-1,1)
+            _, pro2, _ = global_net(x)
+            # pro2: projected features of input from global model
+
+            posi = cos(pro1, pro2) # positive pair
+            logits = posi.reshape(-1,1) # reshape the positive cosine similarity to a column vector
 
             for previous_net in previous_nets:
                 previous_net.cuda()
-                _, pro3, _ = previous_net(x)
-                nega = cos(pro1, pro3)
-                logits = torch.cat((logits, nega.reshape(-1,1)), dim=1)
+                _, pro3, _ = previous_net(x) 
+                # pro3: projected features of input from previous local model
+                nega = cos(pro1, pro3) # negative pair
+                logits = torch.cat((logits, nega.reshape(-1,1)), dim=1) # concatenate the logits of positive and negative pairs horizontally (add more columns)
+                # First column: positive similarity (with global model)
+                # Remaining columns: negative similarities (with previous models)
+                # You want each row to be one sample
+                # And each column to be one comparison (positive and negatives)
+                # So dim=1 makes each row contain all logits relevant to that sample — perfect for CrossEntropyLoss, which expects that format
 
                 previous_net.to('cpu')
 
-            logits /= temperature
-            labels = torch.zeros(x.size(0)).cuda().long()
+            logits /= temperature # scale the logits by the temperature parameter
+            labels = torch.zeros(x.size(0)).cuda().long() # create labels for the logits
 
-            loss2 = mu * criterion(logits, labels)
+            # This performs: -log( exp(sim(z, z_glob)/τ) / (exp(sim(z, z_glob)/τ) + ∑ exp(sim(z, z_prev)/τ)) )
+            loss2 = mu * criterion(logits, labels) # compute the contrastive loss
 
-
-            loss1 = criterion(out, target)
+            loss1 = criterion(out, target) # compute the cross-entropy loss
             loss = loss1 + loss2
-
-            loss.backward()
-            optimizer.step()
+ 
+            loss.backward() # backpropagate the loss
+            optimizer.step() # update the model parameters
 
             cnt += 1
-            epoch_loss_collector.append(loss.item())
-            epoch_loss1_collector.append(loss1.item())
-            epoch_loss2_collector.append(loss2.item())
+            epoch_loss_collector.append(loss.item()) # total loss
+            epoch_loss1_collector.append(loss1.item()) # cross-entropy loss
+            epoch_loss2_collector.append(loss2.item()) # contrastive loss
 
-        epoch_loss = sum(epoch_loss_collector) / len(epoch_loss_collector)
-        epoch_loss1 = sum(epoch_loss1_collector) / len(epoch_loss1_collector)
-        epoch_loss2 = sum(epoch_loss2_collector) / len(epoch_loss2_collector)
+        epoch_loss = sum(epoch_loss_collector) / len(epoch_loss_collector) 
+        epoch_loss1 = sum(epoch_loss1_collector) / len(epoch_loss1_collector) 
+        epoch_loss2 = sum(epoch_loss2_collector) / len(epoch_loss2_collector) 
         logger.info('Epoch: %d Loss: %f Loss1: %f Loss2: %f' % (epoch, epoch_loss, epoch_loss1, epoch_loss2))
 
 
@@ -339,18 +353,18 @@ def train_net_fedcon(net_id, net, global_net, previous_nets, train_dataloader, t
     logger.info(' ** Training complete **')
     return train_acc, test_acc
 
-
+# Function to train local models
 def local_train_net(nets, args, net_dataidx_map, train_dl=None, test_dl=None, global_model = None, prev_model_pool = None, server_c = None, clients_c = None, round=None, device="cpu"):
     avg_acc = 0.0
     acc_list = []
     if global_model:
-        global_model.cuda()
+        global_model.cuda() 
     if server_c:
         server_c.cuda()
-        server_c_collector = list(server_c.cuda().parameters())
-        new_server_c_collector = copy.deepcopy(server_c_collector)
+        server_c_collector = list(server_c.cuda().parameters()) # collect server_c parameters
+        new_server_c_collector = copy.deepcopy(server_c_collector) # create a copy of server_c parameters
     for net_id, net in nets.items():
-        dataidxs = net_dataidx_map[net_id]
+        dataidxs = net_dataidx_map[net_id] # get the data indices for the current network
 
         logger.info("Training network %s. n_training: %d" % (str(net_id), len(dataidxs)))
         train_dl_local, test_dl_local, _, _ = get_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs)
@@ -366,7 +380,7 @@ def local_train_net(nets, args, net_dataidx_map, train_dl=None, test_dl=None, gl
         elif args.alg == 'moon':
             prev_models=[]
             for i in range(len(prev_model_pool)):
-                prev_models.append(prev_model_pool[i][net_id])
+                prev_models.append(prev_model_pool[i][net_id]) # collect previous models
             trainacc, testacc = train_net_fedcon(net_id, net, global_model, prev_models, train_dl_local, test_dl, n_epoch, args.lr,
                                                   args.optimizer, args.mu, args.temperature, args, round, device=device)
 
@@ -425,28 +439,34 @@ if __name__ == '__main__':
 
     logger.info("Partitioning data")
     X_train, y_train, X_test, y_test, net_dataidx_map, traindata_cls_counts = partition_data(
-        args.dataset, args.datadir, args.logdir, args.partition, args.n_parties, beta=args.beta)
+        args.dataset, args.datadir, args.logdir, args.partition, args.n_parties, beta=args.beta) # partition the data
+    # net_dataidx_map is a dictionary mapping each party to its data indices
 
-    n_party_per_round = int(args.n_parties * args.sample_fraction)
-    party_list = [i for i in range(args.n_parties)]
-    party_list_rounds = []
+    n_party_per_round = int(args.n_parties * args.sample_fraction) # number of parties sampled in each round
+    party_list = [i for i in range(args.n_parties)] # list of parties
+    party_list_rounds = [] # to store the parties sampled in each round
+    # party_list_rounds = [
+    #     [0, 2, 3],   # round 1: sampled clients
+    #     [1, 2, 4],   # round 2: sampled clients
+    #     [0, 3, 4]    # round 3: sampled clients
+    # ]
     if n_party_per_round != args.n_parties:
         for i in range(args.comm_round):
-            party_list_rounds.append(random.sample(party_list, n_party_per_round))
-    else:
-        for i in range(args.comm_round):
-            party_list_rounds.append(party_list)
+            party_list_rounds.append(random.sample(party_list, n_party_per_round)) # sample n_party_per_round parties for each round
+    else: 
+        for i in range(args.comm_round): 
+            party_list_rounds.append(party_list) # if n_party_per_round equals total number of parties, sample all parties
 
-    n_classes = len(np.unique(y_train))
+    n_classes = len(np.unique(y_train)) # number of classes in the training data
 
     train_dl_global, test_dl, train_ds_global, test_ds_global = get_dataloader(args.dataset,
                                                                                args.datadir,
                                                                                args.batch_size,
                                                                                32)
 
-    print("len train_dl_global:", len(train_ds_global))
-    train_dl=None
-    data_size = len(test_ds_global)
+    print("len train_dl_global:", len(train_ds_global)) # length of the global training dataset
+    train_dl=None # train_dataloader for local training
+    data_size = len(test_ds_global) # size of the test dataset
 
     logger.info("Initializing nets")
     nets, local_model_meta_data, layer_type = init_nets(args.net_config, args.n_parties, args, device='cpu')
@@ -454,24 +474,24 @@ if __name__ == '__main__':
     global_models, global_model_meta_data, global_layer_type = init_nets(args.net_config, 1, args, device='cpu')
     global_model = global_models[0]
     n_comm_rounds = args.comm_round
-    if args.load_model_file and args.alg != 'plot_visual':
+    if args.load_model_file and args.alg != 'plot_visual': # if a model file is provided, load the model
         global_model.load_state_dict(torch.load(args.load_model_file))
         n_comm_rounds -= args.load_model_round
 
-    if args.server_momentum:
+    if args.server_momentum: # initialize server momentum
         moment_v = copy.deepcopy(global_model.state_dict())
         for key in moment_v:
             moment_v[key] = 0
     if args.alg == 'moon':
-        old_nets_pool = []
-        if args.load_pool_file:
+        old_nets_pool = [] # buffer for previous local models (used as negatives)
+        if args.load_pool_file: # Option A: Load model pool from file (optional)
             for nets_id in range(args.model_buffer_size):
                 old_nets, _, _ = init_nets(args.net_config, args.n_parties, args, device='cpu')
                 checkpoint = torch.load(args.load_pool_file)
                 for net_id, net in old_nets.items():
                     net.load_state_dict(checkpoint['pool' + str(nets_id) + '_'+'net'+str(net_id)])
                 old_nets_pool.append(old_nets)
-        elif args.load_first_net:
+        elif args.load_first_net: # Option B: Use current nets as the first "old" pool (if not loading from file)
             if len(old_nets_pool) < args.model_buffer_size:
                 old_nets = copy.deepcopy(nets)
                 for _, net in old_nets.items():
@@ -481,46 +501,47 @@ if __name__ == '__main__':
 
         for round in range(n_comm_rounds):
             logger.info("in comm round:" + str(round))
-            party_list_this_round = party_list_rounds[round]
+            party_list_this_round = party_list_rounds[round] # get the parties sampled in this round (party_list_this_round: an array of participating parties indices)
 
             global_model.eval()
-            for param in global_model.parameters():
-                param.requires_grad = False
-            global_w = global_model.state_dict()
+            for param in global_model.parameters(): # set requires_grad to False for global model
+                param.requires_grad = False 
+            global_w = global_model.state_dict() # get the state_dict of the global model
 
             if args.server_momentum:
-                old_w = copy.deepcopy(global_model.state_dict())
+                old_w = copy.deepcopy(global_model.state_dict()) # create a copy of the global model state_dict for momentum update
 
-            nets_this_round = {k: nets[k] for k in party_list_this_round}
+            nets_this_round = {k: nets[k] for k in party_list_this_round} # get the nets for the sampled parties in this round
+            
+            # Step 1: Send current global model to clients
             for net in nets_this_round.values():
-                net.load_state_dict(global_w)
+                net.load_state_dict(global_w) # load the global model state_dict into the nets for this round
 
-
+            # Step 2: Local training with MOON contrastive loss
             local_train_net(nets_this_round, args, net_dataidx_map, train_dl=train_dl, test_dl=test_dl, global_model = global_model, prev_model_pool=old_nets_pool, round=round, device=device)
 
 
+            total_data_points = sum([len(net_dataidx_map[r]) for r in party_list_this_round]) # total number of data points across the sampled parties
+            fed_avg_freqs = [len(net_dataidx_map[r]) / total_data_points for r in party_list_this_round] # compute the frequency of each party's data points
 
-            total_data_points = sum([len(net_dataidx_map[r]) for r in party_list_this_round])
-            fed_avg_freqs = [len(net_dataidx_map[r]) / total_data_points for r in party_list_this_round]
-
-
-            for net_id, net in enumerate(nets_this_round.values()):
-                net_para = net.state_dict()
+            # Step 3: Aggregate local models
+            for net_id, net in enumerate(nets_this_round.values()): 
+                net_para = net.state_dict() 
                 if net_id == 0:
                     for key in net_para:
-                        global_w[key] = net_para[key] * fed_avg_freqs[net_id]
+                        global_w[key] = net_para[key] * fed_avg_freqs[net_id] # initialize the global model with the first net's parameters weighted by its frequency
                 else:
                     for key in net_para:
-                        global_w[key] += net_para[key] * fed_avg_freqs[net_id]
+                        global_w[key] += net_para[key] * fed_avg_freqs[net_id] # aggregate the parameters of the nets weighted by their frequencies
 
             if args.server_momentum:
-                delta_w = copy.deepcopy(global_w)
+                delta_w = copy.deepcopy(global_w) # create a copy of the global model state_dict for momentum update
                 for key in delta_w:
-                    delta_w[key] = old_w[key] - global_w[key]
-                    moment_v[key] = args.server_momentum * moment_v[key] + (1-args.server_momentum) * delta_w[key]
-                    global_w[key] = old_w[key] - moment_v[key]
+                    delta_w[key] = old_w[key] - global_w[key] # compute the change in parameters
+                    moment_v[key] = args.server_momentum * moment_v[key] + (1-args.server_momentum) * delta_w[key] # update the momentum
+                    global_w[key] = old_w[key] - moment_v[key] # update the global model parameters with momentum
 
-            global_model.load_state_dict(global_w)
+            global_model.load_state_dict(global_w) # load the updated global model state_dict
             #summary(global_model.to(device), (3, 32, 32))
 
             logger.info('global n_training: %d' % len(train_dl_global))
@@ -533,30 +554,37 @@ if __name__ == '__main__':
             logger.info('>> Global Model Test accuracy: %f' % test_acc)
             logger.info('>> Global Model Train loss: %f' % train_loss)
 
-
-            if len(old_nets_pool) < args.model_buffer_size:
-                old_nets = copy.deepcopy(nets)
+            # Step 4: Update model pool (used in next round's contrastive loss)
+            # Each round, the oldest model gets removed, and the newest one is added to the end
+            # model_buffer_size = 3
+            # Round 7 ➜ Pool: [model4, model5, model6]
+            # Round 8 ➜ Pool: [model5, model6, model7]
+            # Round 9 ➜ Pool: [model6, model7, model8]
+            
+            if len(old_nets_pool) < args.model_buffer_size: # Case 1: If the pool is not full yet
+                old_nets = copy.deepcopy(nets) 
                 for _, net in old_nets.items():
                     net.eval()
                     for param in net.parameters():
-                        param.requires_grad = False
-                old_nets_pool.append(old_nets)
-            elif args.pool_option == 'FIFO':
-                old_nets = copy.deepcopy(nets)
+                        param.requires_grad = False # freeze the parameters so they won’t be accidentally updated
+                old_nets_pool.append(old_nets) # append the current nets to the old_nets_pool
+            elif args.pool_option == 'FIFO': # Case 2: If the pool is already full
+                old_nets = copy.deepcopy(nets) 
                 for _, net in old_nets.items():
                     net.eval()
                     for param in net.parameters():
                         param.requires_grad = False
                 for i in range(args.model_buffer_size-2, -1, -1):
-                    old_nets_pool[i] = old_nets_pool[i+1]
-                old_nets_pool[args.model_buffer_size - 1] = old_nets
+                    old_nets_pool[i] = old_nets_pool[i+1] # shift the old nets in the pool
+                old_nets_pool[args.model_buffer_size - 1] = old_nets # replace the last old net with the current nets
+
 
             mkdirs(args.modeldir+'fedcon/')
             if args.save_model:
-                torch.save(global_model.state_dict(), args.modeldir+'fedcon/global_model_'+args.log_file_name+'.pth')
-                torch.save(nets[0].state_dict(), args.modeldir+'fedcon/localmodel0'+args.log_file_name+'.pth')
+                torch.save(global_model.state_dict(), args.modeldir+'fedcon/global_model_'+args.log_file_name+'.pth') # save the global model state_dict
+                torch.save(nets[0].state_dict(), args.modeldir+'fedcon/localmodel0'+args.log_file_name+'.pth') # save the first net's state_dict
                 for nets_id, old_nets in enumerate(old_nets_pool):
-                    torch.save({'pool'+ str(nets_id) + '_'+'net'+str(net_id): net.state_dict() for net_id, net in old_nets.items()}, args.modeldir+'fedcon/prev_model_pool_'+args.log_file_name+'.pth')
+                    torch.save({'pool'+ str(nets_id) + '_'+'net'+str(net_id): net.state_dict() for net_id, net in old_nets.items()}, args.modeldir+'fedcon/prev_model_pool_'+args.log_file_name+'.pth') # save the old nets' state_dicts in the pool
 
 
     elif args.alg == 'fedavg':
