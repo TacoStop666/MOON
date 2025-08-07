@@ -27,10 +27,9 @@ def mkdirs(dirpath):
 
 
 def load_cifar10_data(datadir):
-    # Create a transform to convert images to tensors
     transform = transforms.Compose([transforms.ToTensor()])
-    # transforms.Compose([...]) allows you to chain multiple transformations together
-    # transforms.ToTensor() converts an image to a tensor and scales pixel values from [0, 255] to [0.0, 1.0]
+    # transforms.Compose([...]) creates a pipeline of transformations to apply to images. In this case, there is only one transformation transforms.ToTensor()
+    # transforms.ToTensor() converts a PIL image or a NumPy array into a PyTorch tensor
 
     cifar10_train_ds = CIFAR10_truncated(datadir, train=True, download=True, transform=transform)
     cifar10_test_ds = CIFAR10_truncated(datadir, train=False, download=True, transform=transform)
@@ -324,7 +323,7 @@ def load_model(model, model_index, device="cpu"):
     return model
 
 def get_dataloader(dataset, datadir, train_bs, test_bs, dataidxs=None, noise_level=0):
-    if dataset in ('cifar10', 'cifar100'):
+    if dataset in ('cifar10', 'cifar100'): # sets up normalization and data augmentation (random crop, flip, rotation, etc.) for training, and just normalization for testing
         if dataset == 'cifar10':
             dl_obj = CIFAR10_truncated
 
@@ -347,7 +346,7 @@ def get_dataloader(dataset, datadir, train_bs, test_bs, dataidxs=None, noise_lev
                 transforms.ToTensor(),
                 normalize])
 
-        elif dataset == 'cifar100':
+        elif dataset == 'cifar100': # uses a different normalization
             dl_obj = CIFAR100_truncated
 
             normalize = transforms.Normalize(mean=[0.5070751592371323, 0.48654887331495095, 0.4409178433670343],

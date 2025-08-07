@@ -306,11 +306,11 @@ class SimpleCNNContainer(nn.Module):
 class LeNet(nn.Module):
     def __init__(self):
         super(LeNet, self).__init__()
-        self.conv1 = nn.Conv2d(1, 20, 5, 1)
-        self.conv2 = nn.Conv2d(20, 50, 5, 1)
-        self.fc1 = nn.Linear(4 * 4 * 50, 500)
-        self.fc2 = nn.Linear(500, 10)
-        self.ceriation = nn.CrossEntropyLoss()
+        self.conv1 = nn.Conv2d(1, 20, 5, 1) # First convolutional layer with 1 input channel, 20 output channels, and a kernel size of 5
+        self.conv2 = nn.Conv2d(20, 50, 5, 1) # Second convolutional layer with 20 input channels, 50 output channels, and a kernel size of 5
+        self.fc1 = nn.Linear(4 * 4 * 50, 500) # First fully connected layer with input dimension 4*4*50 and output dimension 500
+        self.fc2 = nn.Linear(500, 10) # Second fully connected layer with input dimension 500 and output dimension 10
+        self.criterion = nn.CrossEntropyLoss()
 
     def forward(self, x):
         x = self.conv1(x)
@@ -579,10 +579,10 @@ class ModelFedCon(nn.Module):
             raise ("Invalid model name. Check the config file and pass one of: resnet18 or resnet50")
 
     def forward(self, x):
-        h = self.features(x)
+        h = self.features(x) # Extract features using the convolutional layers
         #print("h before:", h)
         #print("h size:", h.size())
-        h = h.squeeze()
+        h = h.squeeze() # Flatten the output tensor to a 1D vector
         #print("h after:", h)
         x = self.l1(h)
         x = F.relu(x)
