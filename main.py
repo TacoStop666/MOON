@@ -353,10 +353,84 @@ def train_net_fedcon(net_id, net, global_net, previous_nets, train_dataloader, t
     logger.info(' ** Training complete **')
     return train_acc, test_acc
 
-# Function to train local models
-def local_train_net(nets, args, net_dataidx_map, train_dl=None, test_dl=None, global_model = None, prev_model_pool = None, server_c = None, clients_c = None, round=None, device="cpu"):
+def train_net_my(net_id, net, global_net, train_dataloader, test_dataloader, epochs, lr, args_optimizer, mu, temperature, args, round, device="cpu"):
+    net = nn.DataParallel(net) 
+    net.cuda() 
+    logger.info('Training network %s' % str(net_id)) 
+    logger.info('n_training: %d' % len(train_dataloader)) 
+    logger.info('n_test: %d' % len(test_dataloader))
+
+    train_acc,_ = compute_accuracy(net, train_dataloader, device=device)
+
+    test_acc, conf_matrix,_ = compute_accuracy(net, test_dataloader, get_confusion_matrix=True, device=device)
+
+    # Compute the test accuracy of the global model
+    global_test_acc, _, _ = compute_accuracy(global_net, test_dataloader, get_confusion_matrix=True, device=device)
+
+    logger.info('>> Pre-Training Training accuracy: {}'.format(train_acc))
+    logger.info('>> Pre-Training Test accuracy: {}'.format(test_acc))
+    logger.info('>> Pre-Training Global Test accuracy: {}'.format(global_test_acc))
+
+    if args_optimizer == 'adam':
+        optimizer = optim.Adam(filter(lambda p: p.requires_grad, net.parameters()), lr=lr, weight_decay=args.reg)
+    elif args_optimizer == 'amsgrad':
+        optimizer = optim.Adam(filter(lambda p: p.requires_grad, net.parameters()), lr=lr, weight_decay=args.reg,
+                               amsgrad=True)
+    elif args_optimizer == 'sgd':
+        optimizer = optim.SGD(filter(lambda p: p.requires_grad, net.parameters()), lr=lr, momentum=0.9,
+                              weight_decay=args.reg)
+    criterion = nn.CrossEntropyLoss().cuda() 
+
+    cnt = 0
+
+    for epoch in range(epochs):
+        epoch_loss_collector = [] # to collect loss values for each epoch
+        for batch_idx, (x, target) in enumerate(train_dataloader): # iterate through the training dataloader
+            x, target = x.cuda(), target.cuda() 
+            # x: input data, target: ground truth labels
+
+            optimizer.zero_grad() # zero the gradients
+            x.requires_grad = False # disable gradient computation for input
+            target.requires_grad = False # disable gradient computation for target
+            target = target.long() # convert target to long type
+
+            _,_,out = net(x) # forward pass through the model
+            loss = criterion(out, target) # compute the cross-entropy loss
+            # loss is something look like tensor(2.3026, device='cuda:0')
+
+            loss.backward() # backpropagate the loss
+            optimizer.step() # update the model parameters
+
+            cnt += 1 # increment the counter
+            epoch_loss_collector.append(loss.item()) # append the loss value to epoch_loss_collector
+            # loss.item() is a Python float representing the loss value
+
+        epoch_loss = sum(epoch_loss_collector) / len(epoch_loss_collector) # compute the average loss for the epoch
+        logger.info('Epoch: %d Loss: %f' % (epoch, epoch_loss)) # log the epoch number and loss value
+
+        if epoch % 10 == 0: # log training and test accuracy every 10 epochs
+            train_acc, _ = compute_accuracy(net, train_dataloader, device=device)
+            test_acc, conf_matrix, _ = compute_accuracy(net, test_dataloader, get_confusion_matrix=True, device=device)
+
+            logger.info('>> Training accuracy: %f' % train_acc)
+            logger.info('>> Test accuracy: %f' % test_acc)
+
+    train_acc, _ = compute_accuracy(net, train_dataloader, device=device) # _ avg loss
+    test_acc, conf_matrix, _ = compute_accuracy(net, test_dataloader, get_confusion_matrix=True, device=device)
+
+    logger.info('>> Training accuracy: %f' % train_acc)
+    logger.info('>> Test accuracy: %f' % test_acc)
+    net.to('cpu')
+
+    logger.info(' ** Training complete **')
+    return train_acc, test_acc, global_test_acc
+    
+
+# Client-side
+def local_train_net(nets, args, net_dataidx_map, train_dl=None, test_dl=None, global_model = None, prev_model_pool = None, accuracy_above_average_model_pool = None, accuracy_below_average_model_pool = None, total_accuracy = None, server_c = None, clients_c = None, round=None, device="cpu"):
     avg_acc = 0.0
     acc_list = []
+    global_testacc_list = {}
     if global_model:
         global_model.cuda() 
     if server_c:
@@ -387,6 +461,11 @@ def local_train_net(nets, args, net_dataidx_map, train_dl=None, test_dl=None, gl
         elif args.alg == 'local_training':
             trainacc, testacc = train_net(net_id, net, train_dl_local, test_dl, n_epoch, args.lr, args.optimizer, args,
                                           device=device)
+        elif args.alg == 'my_fedcon':
+            trainacc, testacc, global_testacc = train_net_my(net_id, net, global_model, train_dl_local, test_dl, n_epoch, args.lr,
+                                                args.optimizer, args.mu, args.temperature, args, round, device=device)
+            global_testacc_list[net_id] = global_testacc # store the global test accuracy for each net_id
+            
         logger.info("net %d final test acc %f" % (net_id, testacc))
         avg_acc += testacc
         acc_list.append(testacc)
@@ -400,7 +479,10 @@ def local_train_net(nets, args, net_dataidx_map, train_dl=None, test_dl=None, gl
         for param_index, param in enumerate(server_c.parameters()):
             server_c_collector[param_index] = new_server_c_collector[param_index]
         server_c.to('cpu')
-    return nets
+    if args.alg == 'my_fedcon':
+        return nets, global_testacc_list
+    else:
+        return nets
 
 
 if __name__ == '__main__':
@@ -459,6 +541,7 @@ if __name__ == '__main__':
 
     n_classes = len(np.unique(y_train)) # number of classes in the training data
 
+    # Get the dataloaders for global training and testing datasets
     train_dl_global, test_dl, train_ds_global, test_ds_global = get_dataloader(args.dataset,
                                                                                args.datadir,
                                                                                args.batch_size,
@@ -482,6 +565,8 @@ if __name__ == '__main__':
         moment_v = copy.deepcopy(global_model.state_dict())
         for key in moment_v:
             moment_v[key] = 0
+    
+    # Server-side
     if args.alg == 'moon':
         old_nets_pool = [] # buffer for previous local models (used as negatives)
         if args.load_pool_file: # Option A: Load model pool from file (optional)
@@ -681,6 +766,152 @@ if __name__ == '__main__':
             mkdirs(args.modeldir + 'fedprox/')
             global_model.to('cpu')
             torch.save(global_model.state_dict(), args.modeldir +'fedprox/'+args.log_file_name+ '.pth')
+    elif args.alg == 'my_fedcon':
+        accuracy_above_average_model_pool = [] # buffer for accuracy above average models
+        accuracy_below_average_model_pool = [] # buffer for accuracy below average models
+        global_testacc_list = {} # buffer for global model accuracy
+
+        for round in range(n_comm_rounds):
+
+            accuracy_above_average_model_pool.clear()
+            accuracy_below_average_model_pool.clear()
+            
+            logger.info("in comm round:" + str(round))
+            party_list_this_round = party_list_rounds[round]
+
+            global_w = global_model.state_dict()
+            if args.server_momentum:
+                old_w = copy.deepcopy(global_model.state_dict())
+
+            nets_this_round = {k: nets[k] for k in party_list_this_round}
+
+            # Step 1: Send current global model to clients
+            for net in nets_this_round.values():
+                net.load_state_dict(global_w)
+
+            # Step 2: Local training
+            _, global_testacc_list = local_train_net(nets_this_round, args, net_dataidx_map, train_dl=train_dl, test_dl=test_dl, global_model=global_model, device=device)
+            global_average_testacc = sum(global_testacc_list) / len(global_testacc_list)
+            logger.info('>> Global Model Average Test accuracy: %f' % global_average_testacc)
+
+            # Step 3: Partition the models into above and below average accuracy pools
+            for net_id, net in nets_this_round.items():
+                if global_testacc_list[net_id] >= global_average_testacc:
+                    accuracy_above_average_model_pool.append(net) # positive samples
+                else:
+                    accuracy_below_average_model_pool.append(net) # negative samples
+
+            # Check for empty pools and handle accordingly
+            if len(accuracy_above_average_model_pool) == 0:
+                logger.warning("No above-average models this round, using best model as positive sample.")
+                best_net_id = max(global_testacc_list, key=global_testacc_list.get)
+                accuracy_above_average_model_pool.append(nets_this_round[best_net_id])
+
+            if len(accuracy_below_average_model_pool) == 0:
+                logger.warning("No below-average models this round, using worst model as negative sample.")
+                worst_net_id = min(global_testacc_list, key=global_testacc_list.get)
+                accuracy_below_average_model_pool.append(nets_this_round[worst_net_id])
+
+            total_data_points = sum([len(net_dataidx_map[r]) for r in party_list_this_round])
+            fed_avg_freqs = [len(net_dataidx_map[r]) / total_data_points for r in party_list_this_round]
+
+             # Step 4: Aggregate local models
+            for net_id, net in enumerate(nets_this_round.values()):
+                net_para = net.state_dict()
+                if net_id == 0:
+                    for key in net_para:
+                        global_w[key] = net_para[key] * fed_avg_freqs[net_id]
+                else:
+                    for key in net_para:
+                        global_w[key] += net_para[key] * fed_avg_freqs[net_id]
+
+
+            if args.server_momentum:
+                delta_w = copy.deepcopy(global_w)
+                for key in delta_w:
+                    delta_w[key] = old_w[key] - global_w[key]
+                    moment_v[key] = args.server_momentum * moment_v[key] + (1-args.server_momentum) * delta_w[key]
+                    global_w[key] = old_w[key] - moment_v[key]
+
+
+            global_model.load_state_dict(global_w)
+
+            # Step 5: Leverage accuracy_above_average_model_pool as positive samples and accuracy_below_average_model_pool as negative samples for contrastive loss
+            optimizer = optim.SGD(filter(lambda p: p.requires_grad, net.parameters()), lr=0.01, momentum=0.9,weight_decay=args.reg)
+
+            criterion = nn.CrossEntropyLoss().cuda()
+            cos = torch.nn.CosineSimilarity(dim=-1) # cosine similarity function
+            global_w = global_model.state_dict()
+
+            # Step 6: Train the global model with contrastive loss
+            
+            # Ensure all models and tensors are on the same device
+            global_model = global_model.cuda()
+            for i in range(len(accuracy_above_average_model_pool)):
+                accuracy_above_average_model_pool[i] = accuracy_above_average_model_pool[i].cuda()
+            for i in range(len(accuracy_below_average_model_pool)):
+                accuracy_below_average_model_pool[i] = accuracy_below_average_model_pool[i].cuda()
+
+            for batch_idx, (x, target) in enumerate(train_dl_global):
+                x, target = x.cuda(), target.cuda()
+                optimizer.zero_grad()
+                x.requires_grad = False
+                target.requires_grad = False
+                target = target.long()
+                _, pro1, out = global_model(x) # anchor
+
+                # Use the first above-average model as positive (or average their projections)
+                pos_logits = []
+                for accuracy_above_average_model in accuracy_above_average_model_pool:
+                    _, pro_pos, _ = accuracy_above_average_model(x)
+                    posi = cos(pro1, pro_pos)
+                    pos_logits.append(posi.reshape(-1, 1))
+                # Average positive logits if multiple models, or just use the first one
+                if len(pos_logits) > 0:
+                    if len(pos_logits) > 1:
+                        posi = torch.mean(torch.cat(pos_logits, dim=1), dim=1, keepdim=True)
+                    else:
+                        posi = pos_logits[0]
+                else:
+                    raise ValueError("No positive models found in accuracy_above_average_model_pool!")
+
+                logits = posi  # Start logits with positive sample(s)
+
+                # Now add negative samples
+                for accuracy_below_average_model in accuracy_below_average_model_pool:
+                    _, pro_neg, _ = accuracy_below_average_model(x)
+                    nega = cos(pro1, pro_neg)
+                    logits = torch.cat((logits, nega.reshape(-1, 1)), dim=1)
+                
+                logits /= args.temperature
+                labels = torch.zeros(x.size(0)).cuda().long() # create labels for the logits
+                loss = criterion(logits, labels) # compute the contrastive loss
+                
+                loss.backward() # backpropagate the loss
+                optimizer.step()
+                
+                logger.info(f'Batch {batch_idx}: Contrastive loss = {loss.item():.6f}')
+
+            #logger.info('global n_training: %d' % len(train_dl_global))
+            logger.info('global n_test: %d' % len(test_dl))
+            # global_model.cuda()
+            train_acc, train_loss = compute_accuracy(global_model, train_dl_global, device=device)
+            test_acc, conf_matrix, _ = compute_accuracy(global_model, test_dl, get_confusion_matrix=True, device=device)
+
+            logger.info('>> Global Model Train accuracy: %f' % train_acc)
+            logger.info('>> Global Model Test accuracy: %f' % test_acc)
+            logger.info('>> Global Model Train loss: %f' % train_loss)
+            mkdirs(args.modeldir+'my_fedcon/')
+
+            # Ensure all models and tensors are on the same device
+            global_model.to('cpu')
+            for i in range(len(accuracy_above_average_model_pool)):
+                accuracy_above_average_model_pool[i] = accuracy_above_average_model_pool[i].to('cpu')
+            for i in range(len(accuracy_below_average_model_pool)):
+                accuracy_below_average_model_pool[i] = accuracy_below_average_model_pool[i].to('cpu')
+
+            torch.save(global_model.state_dict(), args.modeldir+'my_fedcon/'+'globalmodel'+args.log_file_name+'.pth')
+            torch.save(nets[0].state_dict(), args.modeldir+'my_fedcon/'+'localmodel0'+args.log_file_name+'.pth')
 
     elif args.alg == 'local_training':
         logger.info("Initializing nets")
@@ -698,4 +929,5 @@ if __name__ == '__main__':
         mkdirs(args.modeldir + 'all_in/')
 
         torch.save(nets[0].state_dict(), args.modeldir+'all_in/'+args.log_file_name+ '.pth')
+    
 
