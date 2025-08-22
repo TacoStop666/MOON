@@ -161,8 +161,13 @@ def partition_data(dataset, datadir, logdir, partition, n_parties, beta=0.4):
             np.random.shuffle(idx_batch[j]) # 
             net_dataidx_map[j] = idx_batch[j]
 
+    n_test = y_test.shape[0] # Number of test samples
+    test_idxs = np.random.permutation(n_test) # Randomly shuffle the test data indices
+    test_batch_idxs = np.array_split(test_idxs, n_parties) # Split the test data indices among the parties
+    net_test_dataidx_map = {i: test_batch_idxs[i] for i in range(n_parties)} # Map each party to its test data indices
+
     traindata_cls_counts = record_net_data_stats(y_train, net_dataidx_map, logdir)
-    return (X_train, y_train, X_test, y_test, net_dataidx_map, traindata_cls_counts)
+    return (X_train, y_train, X_test, y_test, net_dataidx_map, traindata_cls_counts, net_test_dataidx_map)
 
 
 def get_trainable_parameters(net, device='cpu'):
@@ -322,7 +327,7 @@ def load_model(model, model_index, device="cpu"):
         model.cuda() # Move the model to the specified device (GPU)
     return model
 
-def get_dataloader(dataset, datadir, train_bs, test_bs, dataidxs=None, noise_level=0):
+def get_dataloader(dataset, datadir, train_bs, test_bs, dataidxs=None, test_dataidxs=None,noise_level=0):
     if dataset in ('cifar10', 'cifar100'): # sets up normalization and data augmentation (random crop, flip, rotation, etc.) for training, and just normalization for testing
         if dataset == 'cifar10':
             dl_obj = CIFAR10_truncated
@@ -374,7 +379,10 @@ def get_dataloader(dataset, datadir, train_bs, test_bs, dataidxs=None, noise_lev
 
         # Initialize datasets
         train_ds = dl_obj(datadir, dataidxs=dataidxs, train=True, transform=transform_train, download=True)
-        test_ds = dl_obj(datadir, train=False, transform=transform_test, download=True)
+        test_ds = dl_obj(datadir, dataidxs=test_dataidxs, train=False, transform=transform_test, download=True)
+        
+        # Not using dataidx for the test set -> every client's test set is the full global test set, not a client-specific partition
+        # test_ds = dl_obj(datadir, train=False, transform=transform_test, download=True)
 
         # Create iterable objects that efficiently load batches of data from the training and test datasets, respectively
         train_dl = data.DataLoader(dataset=train_ds, batch_size=train_bs, drop_last=True, shuffle=True)
