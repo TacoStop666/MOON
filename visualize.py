@@ -32,6 +32,8 @@ all_test_accs = []
 # input name for the figures name
 figure_name = input(f'Enter the name for the figure: ')
 
+plt.figure(figsize=(10, 6))
+
 for idx, log_file in enumerate(log_files):
     test_accs = []
     if use_contrastive and idx == 3:
@@ -71,9 +73,9 @@ for idx, log_file in enumerate(log_files):
         all_test_accs.append(test_accs)
         plt.plot(range(1, len(test_accs) + 1), test_accs, label=f'{model_names[idx]} Test Acc')
 
-plt.xlabel('Round')
+plt.xlabel('Epoch')
 plt.ylabel('Test Accuracy')
-plt.title('Global Model Test Accuracy per Round')
+plt.title('Global Model Test Accuracy per Epoch')
 plt.legend()
 plt.grid(True)
 plt.tight_layout()

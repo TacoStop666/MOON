@@ -211,10 +211,12 @@ def put_trainable_parameters(net, X):
 
 
 def compute_accuracy(model, dataloader, get_confusion_matrix=False, device="cpu", multiloader=False):
-    was_training = False # If the model is in training mode, switch it to evaluation mode
-    if model.training: # Check if the model is currently in training mode
-        model.eval() # Switch the model to evaluation mode
-        was_training = True # Set a flag to remember that we switched the model to evaluation mode
+    # was_training = False # If the model is in training mode, switch it to evaluation mode
+    # if model.training: # Check if the model is currently in training mode
+    #     model.eval() # Switch the model to evaluation mode
+    #     was_training = True # Set a flag to remember that we switched the model to evaluation mode
+    training_mode = model.training
+    model.eval()  # Always switch to eval mode for inference
 
     true_labels_list, pred_labels_list = np.array([]), np.array([])
 
@@ -275,8 +277,14 @@ def compute_accuracy(model, dataloader, get_confusion_matrix=False, device="cpu"
     if get_confusion_matrix:
         conf_matrix = confusion_matrix(true_labels_list, pred_labels_list) # Compute the confusion matrix using true and predicted labels
 
-    if was_training:
-        model.train() # Switch the model back to training mode if it was originally in training mode
+    # if was_training:
+    #     model.train() # Switch the model back to training mode if it was originally in training mode
+
+    # Restore the original mode
+    if training_mode:
+        model.train()
+    else:
+        model.eval()
 
     if get_confusion_matrix:
         return correct / float(total), conf_matrix, avg_loss 
