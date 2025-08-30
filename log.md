@@ -52,17 +52,47 @@
 ### Objective
 - 加上 contrastive learning 的部分 (讓 global model 靠近 global test accuracy above average 的 models)
 - positive samples 的部分沒有取 mean
+- contrastive learning rate 的部分是用 base learning rate * (current round/ max round)
 
 ### Result
 ![result](result\pos_accuracy_above_average_model_not_mean.png)
 - 初期的上升幅度感覺比 baseline 高，後面又掉下來
 
-## experiment_log-2025-08-26-
+## experiment_log-2025-08-26-0028-30
 
 ### Objective
-
+- contrastive learning rate 用 cosine delay
+- contrastive learning rate = 0.005
 
 ### Result
+![result](result\cosine_delay_contrastive_learning_rate.png)
+- 最尾端有跟上來
 
+## experiment_log-2025-08-27-0030-44
 
+### Objective
+- 跟 experiment_log-2025-08-26-0028-30 一樣，只是 contrastive learning rate 調成 0.002
+
+### Result
+![result](result\contrastive_learning_rate_0.002.png)
+- 最尾端有跟上來
+
+## experiment_log-2025-08-28-0045-57
+
+### Objective
+- 跟 experiment_log-2025-08-26-0028-30 一樣，只是 contrastive learning rate 調成 0.001
+
+### Result
+![result](result\contrastive_learning_rate_0.001.png)
+- 最尾端有跟上來
+- 又比 0.002 好一些
+
+## experiment_log-2025-08-29-0045-57
+
+### Objective
+- 跟 experiment_log-2025-08-26-0028-30 一樣，只是 contrastive learning rate 調成 0.0005
+
+### Result
+![result](result\contrastive_learning_rate_0.0005.png)
+- 
 
