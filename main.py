@@ -886,16 +886,16 @@ if __name__ == '__main__':
 
             import math
 
-            base_lr = 0.001
+            base_lr = 0.000075
 
             # Cosine decay: starts at base_lr, goes smoothly to 0
             t = round / max(1, n_comm_rounds - 1)
-            scaled_lr = 0.5 * base_lr * (1 + math.cos(math.pi * t))
+            scaled_lr = 0.5 * base_lr * (1 - math.cos(2 * math.pi * t))
 
             logger.info(f"Contrastive learning rate (round {round}): {scaled_lr:.6f}")
 
             # Use scaled_lr for optimizer
-            optimizer = optim.SGD(filter(lambda p: p.requires_grad, global_model.parameters()), lr=scaled_lr, momentum=0.9, weight_decay=args.reg) 
+            optimizer = optim.SGD(filter(lambda p: p.requires_grad, global_model.parameters()), lr=scaled_lr, momentum=0.9, weight_decay=args.reg)
 
             criterion = nn.CrossEntropyLoss().cuda()
             cos = torch.nn.CosineSimilarity(dim=-1) # cosine similarity function
