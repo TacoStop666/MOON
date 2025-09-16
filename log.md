@@ -77,7 +77,7 @@ scaled_lr = 0.5 * base_lr * (1 + math.cos(math.pi * t))
 - 跟 experiment_log-2025-08-26-0028-30 一樣，只是 contrastive base learning rate 調成 0.002
 
 ### Result
-![result](result\contrastive_learning_rate_0.002.png)
+![result](result\cosine_delay_0.002.png)
 - 最尾端有跟上來
 
 ## experiment_log-2025-08-28-0045-57
@@ -86,7 +86,7 @@ scaled_lr = 0.5 * base_lr * (1 + math.cos(math.pi * t))
 - 跟 experiment_log-2025-08-26-0028-30 一樣，只是 contrastive base learning rate 調成 0.001
 
 ### Result
-![result](result\contrastive_learning_rate_0.001.png)
+![result](result\cosine_decay_0.001.png)
 - 最尾端有跟上來
 - 又比 0.002 好一些
 
@@ -108,7 +108,7 @@ scaled_lr = 0.5 * base_lr * (1 - math.cos(math.pi * t))
 ```
 
 ### Result
-![result](result\opposite_cosine_decay_base_learning_rate_0.001.png)
+![result](result\cosine_warmup_0.001.png)
 - 在 10 round 以前，after contrastive learning 都上升的比 baseline 快，後面掉下來
 - 最後沒收斂
 - 比較 
@@ -128,7 +128,7 @@ scaled_lr = 0.5 * base_lr * (1 - math.cos(math.pi * t))
 - contrastive learning rate -> -cosine delay，從 0 以 -cos 慢慢增加到 0.0005
 
 ### Result
-![result](result\opposite_cosine_decay_base_learning_rate_0.0005.png)
+![result](result\cosine_warmup_0.0005.png)
 - 比 0.001 稍微好一點，但是最後還是沒收斂
 
 ## experiment_log-2025-09-06-1900-33
@@ -150,7 +150,7 @@ scaled_lr = 0.5 * base_lr * (1 - math.cos(math.pi * t))
     - round = 99 -> learning rate = 0
 
 ### Result
-![result](result\cosine_warmup_decay.png)
+![result](result\cosine_warmup_decay_0.0005.png)
 - 開頭和結尾確實不錯，但中間 after contrastive learning 還是有點不好，有可能是 learning rate 還太大
 - 最後 accuracy 介於 fedavg 和 fedprox 中間
 

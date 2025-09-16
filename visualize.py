@@ -21,6 +21,9 @@ use_contrastive = input("Visualize contrastive learning experiment? (y/n): ").lo
 log_files.append(input(f'Enter the path to log file: '))
 model_names.append(input(f'Enter the model name for log file: '))
 
+# Input base learning rate
+base_learning_rate = input("Enter the base learning rate: ")
+
 # Regular expression for test accuracy
 test_acc_pattern = re.compile(r'Global Model Test accuracy:\s*([0-9.]+)')
 after_contrastive_pattern = re.compile(r'>> After contrastive learning:')
@@ -75,9 +78,10 @@ for idx, log_file in enumerate(log_files):
 
 plt.xlabel('Epoch')
 plt.ylabel('Test Accuracy')
-plt.title('Global Model Test Accuracy per Epoch')
+plt.title(f'Global Model Test Accuracy per Epoch (Base LR: {base_learning_rate})')
 plt.legend()
 plt.grid(True)
 plt.tight_layout()
 plt.savefig(f'result/{figure_name}.png')
-plt.show()
+# plt.show()
+exit()
