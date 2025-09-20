@@ -323,8 +323,11 @@ def train_net_fedcon(net_id, net, global_net, previous_nets, train_dataloader, t
             logits /= temperature # scale the logits by the temperature parameter
             labels = torch.zeros(x.size(0)).cuda().long() # create labels for the logits
 
+            t = float(round + 1) / 100   # normalized round [0,1]
+            mu_t = 0.5 * mu * (1 - math.cos(2 * math.pi * t))  # cosine warmup+decay
+            loss2 = mu_t * criterion(logits, labels)
             # This performs: -log( exp(sim(z, z_glob)/τ) / (exp(sim(z, z_glob)/τ) + ∑ exp(sim(z, z_prev)/τ)) )
-            loss2 = mu * criterion(logits, labels) # compute the contrastive loss
+            # loss2 = mu * criterion(logits, labels) # compute the contrastive loss
 
             loss1 = criterion(out, target) # compute the cross-entropy loss
             loss = loss1 + loss2
@@ -886,11 +889,11 @@ if __name__ == '__main__':
 
             import math
 
-            base_lr = 0.000075
+            base_lr = 0.0005
 
-            # Cosine decay: starts at base_lr, goes smoothly to 0
             t = round / max(1, n_comm_rounds - 1)
             scaled_lr = 0.5 * base_lr * (1 - math.cos(2 * math.pi * t))
+            # scaled_lr = 0.5 * base_lr * (1 + math.cos(math.pi * t))
 
             logger.info(f"Contrastive learning rate (round {round}): {scaled_lr:.6f}")
 
