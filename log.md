@@ -21,16 +21,6 @@
 - 這邊的 mu 要記得改成 0.01
 - 原封不動的 code
 
-## experiment_log-2025-08-21-0018-26
-
-### Objective
-- 把 global model contrastive learning 的部分先註解掉，只跑 fedavg 在 local training 的部分多跑一個 global model test accuracy on local test data 並回傳給 server，觀察是否合理
-- 理論上要跟 fedavg 一樣
-
-### Result
-![result](result\fedavg_plus_global_test_accuracy_on_local_test_set.png)
-- 不知道為甚麼跑到 200 round，結果跟 fedavg 不一樣
-- 原因:不小心印兩次 global model test accuracy
 
 ## experiment_log-2025-08-22-0042-48
 
@@ -180,4 +170,60 @@ scaled_lr = 0.5 * base_lr * (1 - math.cos(math.pi * t))
 
 ### Result
 ![result](result\cosine_warmup_decay_0.000075.png)
+
+## experiment_log-2025-09-19-0028-48
+
+### Objective
+- moon 演算法的 local contrastive loss 的 coefficient 改成 cosine warmup + cosine decay 
+- base coefficient = 0.01
+
+### Result
+![result](result\moon_cosine_warmup_decay_coefficient_contrastive_loss.png)
+
+
+## experiment_log-2025-09-19-1507-55
+
+### Objective
+- global contrastive learning rate -> cosine decay
+- base learning rate = 0.0005
+
+### Result
+![result](result\cosine_decay_0.0005.png)
+
+## experiment_log-2025-09-20-1113-51
+
+### Objective
+- average positive -> only one positive sample
+- base learning rate = 0.0005
+
+### Result
+![result](result\average_positive_sample_0.0005.png)
+
+## experiment_log-2025-09-27-0124-44
+
+### Objective
+- Add server-side contrastive learning to MOON (client-side) contrastive learning
+- Use multi-positive instead of averaging positive samples for server contrastive learning
+- base learning rate = 0.0005
+
+### Result
+![result](result\server-side_moon_0.0005.png)
+
+## experiment_log-2025-09-27-2148-19
+
+### Objective
+- Same as experiment_log-2025-09-27-0124-44
+- base learning rate = 0.00025
+
+### Result
+![result](result\server-side_moon_0.00025.png)
+
+## experiment_log-2025-09-29-0113-30
+
+### Objective
+- Same as experiment_log-2025-09-27-0124-44
+- base learning rate = 0.000125
+
+### Result
+![result](result\server-side_moon_0.000125.png)
 
