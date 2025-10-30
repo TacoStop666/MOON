@@ -323,11 +323,8 @@ def train_net_fedcon(net_id, net, global_net, previous_nets, train_dataloader, t
             logits /= temperature # scale the logits by the temperature parameter
             labels = torch.zeros(x.size(0)).cuda().long() # create labels for the logits
 
-            t = float(round + 1) / 100   # normalized round [0,1]
-            mu_t = 0.5 * mu * (1 - math.cos(2 * math.pi * t))  # cosine warmup+decay
-            loss2 = mu_t * criterion(logits, labels)
             # This performs: -log( exp(sim(z, z_glob)/τ) / (exp(sim(z, z_glob)/τ) + ∑ exp(sim(z, z_prev)/τ)) )
-            # loss2 = mu * criterion(logits, labels) # compute the contrastive loss
+            loss2 = mu * criterion(logits, labels) # compute the contrastive loss
 
             loss1 = criterion(out, target) # compute the cross-entropy loss
             loss = loss1 + loss2
@@ -795,6 +792,7 @@ if __name__ == '__main__':
             mkdirs(args.modeldir + 'fedprox/')
             global_model.to('cpu')
             torch.save(global_model.state_dict(), args.modeldir +'fedprox/'+args.log_file_name+ '.pth')
+
     elif args.alg == 'my_fedcon':
         accuracy_above_average_model_pool = [] # buffer for accuracy above average models
         accuracy_below_average_model_pool = [] # buffer for accuracy below average models
@@ -889,11 +887,11 @@ if __name__ == '__main__':
 
             import math
 
-            base_lr = 0.0005
+            base_lr = 0.000125
 
+            # Cosine decay: starts at base_lr, goes smoothly to 0
             t = round / max(1, n_comm_rounds - 1)
             scaled_lr = 0.5 * base_lr * (1 - math.cos(2 * math.pi * t))
-            # scaled_lr = 0.5 * base_lr * (1 + math.cos(math.pi * t))
 
             logger.info(f"Contrastive learning rate (round {round}): {scaled_lr:.6f}")
 
@@ -921,34 +919,30 @@ if __name__ == '__main__':
                 target = target.long()
                 _, pro1, out = global_model(x) # anchor
 
-                # --- Positives (above-average models) ---
+                # Use the first above-average model as positive (or average their projections)
                 pos_logits = []
                 for accuracy_above_average_model in accuracy_above_average_model_pool:
                     _, pro_pos, _ = accuracy_above_average_model(x)
-                    posi = cos(pro1, pro_pos)    # similarity with anchor
+                    posi = cos(pro1, pro_pos)
                     pos_logits.append(posi.reshape(-1, 1))
+                # Average positive logits if multiple models, or just use the first one
+                if len(pos_logits) > 0:
+                    if len(pos_logits) > 1:
+                        posi = torch.mean(torch.cat(pos_logits, dim=1), dim=1, keepdim=True)
+                    else:
+                        posi = pos_logits[0]
+                else:
+                    raise ValueError("No positive samples available for contrastive loss.")
+                logits = posi # Start logits with positive sample(s)
 
-                if len(pos_logits) == 0:
-                    raise ValueError("No positive models found in accuracy_above_average_model_pool!")
-
-                logits = torch.cat(pos_logits, dim=1)  # keep each positive as separate column
-
-                # --- Negatives (below-average models) ---
+                # Now add negative samples
                 for accuracy_below_average_model in accuracy_below_average_model_pool:
                     _, pro_neg, _ = accuracy_below_average_model(x)
                     nega = cos(pro1, pro_neg)
                     logits = torch.cat((logits, nega.reshape(-1, 1)), dim=1)
-
-                # --- Contrastive Loss with multi-positives ---
                 logits /= args.temperature
-                batch_size, num_classes = logits.size()
-
-                # Soft labels: positives = uniform prob across positive columns
-                labels = torch.zeros(batch_size, num_classes).cuda()
-                labels[:, :len(pos_logits)] = 1.0 / len(pos_logits)
-
-                log_probs = torch.log_softmax(logits, dim=1)
-                loss = - (labels * log_probs).sum(dim=1).mean()
+                labels = torch.zeros(x.size(0)).cuda().long() # positive is always the first column
+                loss = criterion(logits, labels) # compute the contrastive loss
 
                 # Backprop & update
                 loss.backward()
@@ -992,5 +986,3 @@ if __name__ == '__main__':
         mkdirs(args.modeldir + 'all_in/')
 
         torch.save(nets[0].state_dict(), args.modeldir+'all_in/'+args.log_file_name+ '.pth')
-    
-
