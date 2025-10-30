@@ -5,10 +5,15 @@ import matplotlib.pyplot as plt
 log_files = []
 model_names = []
 
-# Baselines
-log_files.append('logs\experiment_log-2025-07-29-0149-53.log') # MOON
-log_files.append('logs\experiment_log-2025-08-04-0055-32.log') # FedAvg
-log_files.append('logs\experiment_log-2025-08-06-0101-36.log') # FedProx
+# Baselines (For home PC)
+# log_files.append('logs\experiment_log-2025-07-29-0149-53.log') # MOON
+# log_files.append('logs\experiment_log-2025-08-04-0055-32.log') # FedAvg
+# log_files.append('logs\experiment_log-2025-08-06-0101-36.log') # FedProx
+
+# Baselines (For lab server)
+log_files.append('logs/experiment_log-2025-10-29-1010-16.log') # MOON
+log_files.append('logs/experiment_log-2025-10-27-2241-12.log') # FedAvg
+log_files.append('logs/experiment_log-2025-10-29-1804-34.log') # FedProx
 
 model_names.append('MOON')
 model_names.append('FedAvg')

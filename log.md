@@ -227,3 +227,43 @@ scaled_lr = 0.5 * base_lr * (1 - math.cos(math.pi * t))
 ### Result
 ![result](result\server-side_moon_0.000125.png)
 
+---
+
+# experiment_log-2025-10-27-2241-12
+
+## Objective
+- Test run FedAvg algorithm
+
+## Result
+- About 7 hour
+
+# experiment_log-2025-10-28-2022-13
+
+## Objective
+- Test run
+    - positive sample: mean global test accuracy on local test set > average
+    - negative sample: else
+- Cosine warmup + Cosine decay
+
+## Result
+![result](result\test.png)
+
+# experiment_log-2025-10-29-1010-16
+
+## Objective
+- Test run MOON
+
+# experiment_log-2025-10-29-1804-34
+
+## Objective
+- Test run FedProx
+
+# experiment_log-2025-10-30-0141-07
+
+## Objective
+- Use f1-score on training data for differentiating positive and negative samples
+
+## Result
+![result](result\f1-score_on_training_data.png)
+- 10 round 以前上升的比 MOON 好，但是最後沒有收斂，需要調 learning rate 的感覺
+
