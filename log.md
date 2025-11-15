@@ -262,8 +262,31 @@ scaled_lr = 0.5 * base_lr * (1 - math.cos(math.pi * t))
 
 ## Objective
 - Use f1-score on training data for differentiating positive and negative samples
+- global contrastive learning rate = 0.000125
 
 ## Result
 ![result](result\f1-score_on_training_data.png)
 - 10 round 以前上升的比 MOON 好，但是最後沒有收斂，需要調 learning rate 的感覺
+
+# experiment_log-2025-10-31-0114-13
+
+## Objective
+- Same as experiment_log-2025-10-30-0141-07
+- global contrastive learning rate = 0.00025
+
+## Result
+![result](result\f1_score_0.00025.png)
+- 大部分時間 after contrastive learning 都比 before contrastive learning 好，但是在最後掉下去
+
+# experiment_log-2025-11-14-1210-29
+
+## Objective
+- Same as experiment_log-2025-10-30-0141-07
+- global contrastive learning rate = 0.0005
+
+## Result
+![result](result\f1_score_0.0005.png)
+
+
+
 

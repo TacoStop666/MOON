@@ -10,11 +10,19 @@ import copy
 import datetime
 import random
 import math
-
+from sklearn.metrics import f1_score
 
 from model import *
 from utils import *
 
+def compute_f1_from_confusion_matrix(conf_matrix):
+    # conf_matrix: shape [num_classes, num_classes]
+    tp = np.diag(conf_matrix)
+    precision = tp / np.clip(conf_matrix.sum(axis=0), a_min=1, a_max=None)
+    recall = tp / np.clip(conf_matrix.sum(axis=1), a_min=1, a_max=None)
+    f1_per_class = 2 * precision * recall / np.clip((precision + recall), a_min=1e-8, a_max=None)
+    macro_f1 = np.nanmean(f1_per_class)
+    return macro_f1
 
 def get_args():
     parser = argparse.ArgumentParser()
@@ -365,23 +373,14 @@ def train_net_my(net_id, net, global_net, train_dataloader, test_dataloader_loca
     logger.info('n_training: %d' % len(train_dataloader)) 
     logger.info('n_test: %d' % len(test_dataloader_local))
 
-    train_acc,_ = compute_accuracy(net, train_dataloader, device=device)
+    train_acc, conf_matrix, _ = compute_accuracy(net, train_dataloader, get_confusion_matrix=True, device=device)
+    test_acc, _ = compute_accuracy(net, test_dataloader_global, device=device)
 
-    test_acc, conf_matrix, _ = compute_accuracy(net, test_dataloader_global, get_confusion_matrix=True, device=device)
-
-    # Compute the test accuracy of the global model on local client test set
-    if global_net is not None:
-        with torch.no_grad():
-            global_test_acc, _, _ = compute_accuracy(
-                global_net, test_dataloader_local,
-                get_confusion_matrix=True, device=device
-            )
-    else:
-        global_test_acc = None
+    conf_matrix_np = conf_matrix.cpu().numpy() if torch.is_tensor(conf_matrix) else conf_matrix
+    global_f1 = compute_f1_from_confusion_matrix(conf_matrix_np)
 
     logger.info('>> Pre-Training Training accuracy: {}'.format(train_acc))
     logger.info('>> Pre-Training Test accuracy: {}'.format(test_acc)) # local model on global test set
-    logger.info('>> Pre-Training Global Test accuracy: {}'.format(global_test_acc)) # global model on local clients test set
 
     if args_optimizer == 'adam':
         optimizer = optim.Adam(filter(lambda p: p.requires_grad, net.parameters()), lr=lr, weight_decay=args.reg)
@@ -436,15 +435,18 @@ def train_net_my(net_id, net, global_net, train_dataloader, test_dataloader_loca
 
     logger.info(' ** Training complete **')
     
-    return train_acc, test_acc, global_test_acc
+    return train_acc, test_acc, global_f1
     
 
 # Client-side
 def local_train_net(nets, args, net_dataidx_map, net_test_dataidx_map, train_dl=None, test_dl=None, global_model = None, prev_model_pool = None, server_c = None, clients_c = None, round=None, device="cpu"):
     # test_dl -> global
     avg_acc = 0.0
+
     acc_list = []
     global_testacc_list = {}
+    global_f1_list = {}
+
     if global_model:
         global_model.cuda() 
     if server_c:
@@ -485,9 +487,9 @@ def local_train_net(nets, args, net_dataidx_map, net_test_dataidx_map, train_dl=
             trainacc, testacc = train_net(net_id, net, train_dl_local, test_dl, n_epoch, args.lr, args.optimizer, args,
                                           device=device)
         elif args.alg == 'my_fedcon':
-            trainacc, testacc, global_testacc = train_net_my(net_id, net, global_model, train_dl_local, test_dl_local, test_dl, n_epoch, args.lr,
+            trainacc, testacc, global_f1 = train_net_my(net_id, net, global_model, train_dl_local, test_dl_local, test_dl, n_epoch, args.lr,
                                                 args.optimizer, args.mu, args.temperature, args, round, device=device)
-            global_testacc_list[net_id] = global_testacc # store the global test accuracy for each net_id
+            global_f1_list[net_id] = global_f1
             # trainacc, testacc = train_net_my(net_id, net, global_model, train_dl_local, test_dl_local, test_dl, n_epoch, args.lr,
             #                                     args.optimizer, args.mu, args.temperature, args, round, device=device)
             
@@ -505,7 +507,7 @@ def local_train_net(nets, args, net_dataidx_map, net_test_dataidx_map, train_dl=
             server_c_collector[param_index] = new_server_c_collector[param_index]
         server_c.to('cpu')
     if args.alg == 'my_fedcon':
-        return nets, global_testacc_list
+        return nets, global_f1_list
     else:
         return nets
 
@@ -794,14 +796,14 @@ if __name__ == '__main__':
             torch.save(global_model.state_dict(), args.modeldir +'fedprox/'+args.log_file_name+ '.pth')
 
     elif args.alg == 'my_fedcon':
-        accuracy_above_average_model_pool = [] # buffer for accuracy above average models
-        accuracy_below_average_model_pool = [] # buffer for accuracy below average models
-        global_testacc_list = {} # buffer for global model accuracy
+        f1_above_average_model_pool = []
+        f1_below_average_model_pool = []
+        global_f1_list = {}
 
         for round in range(n_comm_rounds):
 
-            accuracy_above_average_model_pool.clear()
-            accuracy_below_average_model_pool.clear()
+            f1_above_average_model_pool.clear()
+            f1_below_average_model_pool.clear()
             
             logger.info("in comm round:" + str(round))
             party_list_this_round = party_list_rounds[round]
@@ -817,14 +819,13 @@ if __name__ == '__main__':
                 net.load_state_dict(global_w)
 
             # Step 2: Local training
-            _, global_testacc_list = local_train_net(nets_this_round, args, net_dataidx_map, net_test_dataidx_map, train_dl=train_dl, test_dl=test_dl_global, global_model=global_model, device=device)
-            global_average_testacc = sum(global_testacc_list.values()) / len(global_testacc_list)
+            _, global_f1_list = local_train_net(nets_this_round, args, net_dataidx_map, net_test_dataidx_map, train_dl=train_dl, test_dl=test_dl_global, global_model=global_model, device=device)
+            global_average_f1 = sum(global_f1_list.values()) / len(global_f1_list)
 
-            for net_id, test_acc in global_testacc_list.items():
-                logger.info('>> Global Model Test accuracy for net %d: %f' % (net_id, test_acc))
+            for net_id, f1 in global_f1_list.items():
+                logger.info('>> Global Model F1-score for net %d: %f' % (net_id, f1))
 
-            logger.info('>> Global Model Average Test accuracy: %f' % global_average_testacc)
-
+            logger.info('>> Global Model Average F1-score: %f' % global_average_f1)
 
             total_data_points = sum([len(net_dataidx_map[r]) for r in party_list_this_round])
             fed_avg_freqs = [len(net_dataidx_map[r]) / total_data_points for r in party_list_this_round]
@@ -863,31 +864,31 @@ if __name__ == '__main__':
 
             # Step 4: Partition the models into above and below average accuracy pools
             for net_id, net in nets_this_round.items():
-                if global_testacc_list[net_id] >= global_average_testacc:
-                    accuracy_above_average_model_pool.append(net) # positive samples
+                if global_f1_list[net_id] >= global_average_f1:
+                    f1_above_average_model_pool.append(net)
                 else:
-                    accuracy_below_average_model_pool.append(net) # negative samples
+                    f1_below_average_model_pool.append(net)
 
             # Check for empty pools and handle accordingly
-            if len(accuracy_above_average_model_pool) == 0:
+            if len(f1_above_average_model_pool) == 0:
                 logger.warning("No above-average models this round, using best model as positive sample.")
-                best_net_id = max(global_testacc_list, key=global_testacc_list.get)
-                accuracy_above_average_model_pool.append(nets_this_round[best_net_id])
+                best_net_id = max(global_f1_list, key=global_f1_list.get)
+                f1_above_average_model_pool.append(nets_this_round[best_net_id])
 
-            logger.info("Above-average model IDs: %s" % [id for id, net in nets_this_round.items() if net in accuracy_above_average_model_pool])
+            logger.info("Above-average model IDs: %s" % [id for id, net in nets_this_round.items() if net in f1_above_average_model_pool])
 
-            if len(accuracy_below_average_model_pool) == 0:
+            if len(f1_below_average_model_pool) == 0:
                 logger.warning("No below-average models this round, using worst model as negative sample.")
-                worst_net_id = min(global_testacc_list, key=global_testacc_list.get)
-                accuracy_below_average_model_pool.append(nets_this_round[worst_net_id])
+                worst_net_id = min(global_f1_list, key=global_f1_list.get)
+                f1_below_average_model_pool.append(nets_this_round[worst_net_id])
 
-            logger.info("Below-average model IDs: %s" % [id for id, net in nets_this_round.items() if net in accuracy_below_average_model_pool])
+            logger.info("Below-average model IDs: %s" % [id for id, net in nets_this_round.items() if net in f1_below_average_model_pool])
 
             # Step 5: Leverage accuracy_above_average_model_pool as positive samples and accuracy_below_average_model_pool as negative samples for contrastive loss
 
             import math
 
-            base_lr = 0.000125
+            base_lr = 0.0005
 
             # Cosine decay: starts at base_lr, goes smoothly to 0
             t = round / max(1, n_comm_rounds - 1)
@@ -906,10 +907,10 @@ if __name__ == '__main__':
             
             # Ensure all models and tensors are on the same device
             # global_model = global_model.cuda()
-            for i in range(len(accuracy_above_average_model_pool)):
-                accuracy_above_average_model_pool[i] = accuracy_above_average_model_pool[i].cuda()
-            for i in range(len(accuracy_below_average_model_pool)):
-                accuracy_below_average_model_pool[i] = accuracy_below_average_model_pool[i].cuda()
+            for i in range(len(f1_above_average_model_pool)):
+                f1_above_average_model_pool[i] = f1_above_average_model_pool[i].cuda()
+            for i in range(len(f1_below_average_model_pool)):
+                f1_below_average_model_pool[i] = f1_below_average_model_pool[i].cuda()
 
             for batch_idx, (x, target) in enumerate(train_dl_global):
                 x, target = x.cuda(), target.cuda()
@@ -921,8 +922,8 @@ if __name__ == '__main__':
 
                 # Use the first above-average model as positive (or average their projections)
                 pos_logits = []
-                for accuracy_above_average_model in accuracy_above_average_model_pool:
-                    _, pro_pos, _ = accuracy_above_average_model(x)
+                for f1_above_average_model in f1_above_average_model_pool:
+                    _, pro_pos, _ = f1_above_average_model(x)
                     posi = cos(pro1, pro_pos)
                     pos_logits.append(posi.reshape(-1, 1))
                 # Average positive logits if multiple models, or just use the first one
@@ -936,8 +937,8 @@ if __name__ == '__main__':
                 logits = posi # Start logits with positive sample(s)
 
                 # Now add negative samples
-                for accuracy_below_average_model in accuracy_below_average_model_pool:
-                    _, pro_neg, _ = accuracy_below_average_model(x)
+                for f1_below_average_model in f1_below_average_model_pool:
+                    _, pro_neg, _ = f1_below_average_model(x)
                     nega = cos(pro1, pro_neg)
                     logits = torch.cat((logits, nega.reshape(-1, 1)), dim=1)
                 logits /= args.temperature
@@ -962,10 +963,10 @@ if __name__ == '__main__':
             
             # Ensure all models and tensors are on the same device
             global_model.to('cpu')
-            for i in range(len(accuracy_above_average_model_pool)):
-                accuracy_above_average_model_pool[i] = accuracy_above_average_model_pool[i].to('cpu')
-            for i in range(len(accuracy_below_average_model_pool)):
-                accuracy_below_average_model_pool[i] = accuracy_below_average_model_pool[i].to('cpu')
+            for i in range(len(f1_above_average_model_pool)):
+                f1_above_average_model_pool[i] = f1_above_average_model_pool[i].to('cpu')
+            for i in range(len(f1_below_average_model_pool)):
+                f1_below_average_model_pool[i] = f1_below_average_model_pool[i].to('cpu')
 
             torch.save(global_model.state_dict(), args.modeldir+'my_fedcon/'+'globalmodel'+args.log_file_name+'.pth')
             torch.save(nets[0].state_dict(), args.modeldir+'my_fedcon/'+'localmodel0'+args.log_file_name+'.pth')
@@ -986,3 +987,5 @@ if __name__ == '__main__':
         mkdirs(args.modeldir + 'all_in/')
 
         torch.save(nets[0].state_dict(), args.modeldir+'all_in/'+args.log_file_name+ '.pth')
+    
+
