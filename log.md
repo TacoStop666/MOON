@@ -287,6 +287,24 @@ scaled_lr = 0.5 * base_lr * (1 - math.cos(math.pi * t))
 ## Result
 ![result](result\f1_score_0.0005.png)
 
+# experiment_log-2025-11-15-1719-02
+
+## Objective
+- global contrastive learning rate = 0.00025
+- 前 40 round 用 f1-score 在 local training data 來分類 positive sample 跟 negative sample，後 60 round 用 global model 在 local testing data 的 test accruacy 來分類 positive sample 跟 negative sample
+
+## Result
+![result](result\f1-score_global_test_accuracy_0.00025.png)
+
+# experiment_log-2025-11-26-2214-36
+
+## Objective
+- same as experiment_log-2025-11-15-1719-02
+- 改成前 20 round 用 f1-score 在 local training data 來分類
+- global contrastive learning rate = 0.000125
+
+## Result
+![result](result\f1-score_global_test_accuracy_split_20.png)
 
 
 
